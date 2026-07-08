@@ -219,7 +219,8 @@ export function Operations() {
     if (operation) {
       setEditingOperation(operation)
       setFormData({
-        date: operation.date,
+        // Garante que o input tipo date receba APENAS "YYYY-MM-DD", ignorando horas e fusos
+        date: operation.date ? operation.date.substring(0, 10) : format(new Date(), 'yyyy-MM-dd'),
         desired_return: operation.desired_return?.toString() || '',
         notes: operation.notes || '',
         status: operation.status,
@@ -561,15 +562,15 @@ export function Operations() {
                             op.status === 'completed'
                               ? 'success'
                               : op.status === 'cancelled'
-                              ? 'destructive'
-                              : 'secondary'
+                                ? 'destructive'
+                                : 'secondary'
                           }
                         >
                           {op.status === 'completed'
                             ? 'Concluída'
                             : op.status === 'cancelled'
-                            ? 'Cancelada'
-                            : 'Pendente'}
+                              ? 'Cancelada'
+                              : 'Pendente'}
                         </Badge>
                       </SelectTrigger>
                       <SelectContent>
@@ -910,15 +911,15 @@ export function Operations() {
                       operationToView.status === 'completed'
                         ? 'success'
                         : operationToView.status === 'cancelled'
-                        ? 'destructive'
-                        : 'secondary'
+                          ? 'destructive'
+                          : 'secondary'
                     }
                   >
                     {operationToView.status === 'completed'
                       ? 'Concluída'
                       : operationToView.status === 'cancelled'
-                      ? 'Cancelada'
-                      : 'Pendente'}
+                        ? 'Cancelada'
+                        : 'Pendente'}
                   </Badge>
                 </div>
                 {operationToView.desired_return && (
@@ -1024,11 +1025,10 @@ export function Operations() {
                   return (
                     <div
                       key={entry.id}
-                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                        selectedWinningEntry === entry.id
+                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${selectedWinningEntry === entry.id
                           ? 'border-green-500 bg-green-50'
                           : 'hover:bg-muted'
-                      }`}
+                        }`}
                       onClick={() => setSelectedWinningEntry(entry.id || '')}
                     >
                       <div className="flex items-center justify-between">
@@ -1070,10 +1070,9 @@ export function Operations() {
                     </div>
                     <div className="flex justify-between">
                       <span>Lucro Final:</span>
-                      <span className={`font-bold ${
-                        (getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
-                        getTotalInvestment(operationToSettle.entries)) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
+                      <span className={`font-bold ${(getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
+                          getTotalInvestment(operationToSettle.entries)) >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
                         {formatCurrency(
                           getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
                           getTotalInvestment(operationToSettle.entries)
