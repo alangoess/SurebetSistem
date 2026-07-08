@@ -76,13 +76,23 @@ const initialEntry: OperationEntry = {
 // Função para formatar data como texto puro, ignorando completamente problemas de fuso horário (Timezone)
 function formatarDataPura(dateStr: string | undefined | null): string {
   if (!dateStr) return '-'
-  const dataLimpa = dateStr.substring(0, 10)
-  const partes = dataLimpa.split('-')
-  if (partes.length === 3) {
-    const [ano, mes, dia] = partes
-    return `${dia}/${mes}/${ano}`
+  
+  // Se vier do banco com fuso horário (ex: T00:00:00Z), criamos o objeto e pegamos o dia local correto
+  const dataObjeto = new Date(dateStr);
+  
+  // Se a data for inválida, tenta o fallback manual
+  if (isNaN(dataObjeto.getTime())) {
+    const dataLimpa = dateStr.substring(0, 10)
+    const partes = dataLimpa.split('-')
+    return partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : dateStr
   }
-  return dateStr
+
+  // Pega o dia, mês e ano local do navegador, sem deslocamento de fuso
+  const dia = String(dataObjeto.getDate()).padStart(2, '0');
+  const mes = String(dataObjeto.getMonth() + 1).padStart(2, '0'); // Meses começam em 0
+  const ano = dataObjeto.getFullYear();
+
+  return `${dia}/${mes}/${ano}`;
 }
 
 // Utility functions for BACK/LAY calculations
