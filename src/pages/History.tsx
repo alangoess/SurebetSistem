@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Download, Filter, X } from 'lucide-react'
-import { format, startOfDay, endOfDay, parse } from 'date-fns'
+import { format, startOfDay, endOfDay, parse, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 interface House {
@@ -144,11 +144,11 @@ export function History() {
     let filtered = [...operations]
 
     if (filters.dateFrom) {
-      filtered = filtered.filter((op) => new Date(op.date) >= new Date(filters.dateFrom))
+      filtered = filtered.filter((op) => parseISO(op.date) >= new Date(filters.dateFrom))
     }
 
     if (filters.dateTo) {
-      filtered = filtered.filter((op) => new Date(op.date) <= new Date(filters.dateTo))
+      filtered = filtered.filter((op) => parseISO(op.date) <= new Date(filters.dateTo))
     }
 
     if (filters.houseId) {
@@ -202,7 +202,7 @@ export function History() {
       const entriesStr = op.entries.map((e) => `${e.house?.name || 'N/A'}: ${e.stake}@${e.odd}`).join('; ')
 
       return [
-        format(new Date(op.date), 'dd/MM/yyyy'),
+        format(parseISO(op.date), 'dd/MM/yyyy'),
         op.status,
         invested.toFixed(2),
         returned.toFixed(2),
@@ -229,7 +229,7 @@ export function History() {
       const entriesStr = op.entries.map((e) => `${e.house?.name}: ${e.stake}@${e.odd}`).join('; ')
 
       return [
-        format(new Date(op.date), 'dd/MM/yyyy'),
+        format(parseISO(op.date), 'dd/MM/yyyy'),
         op.status,
         formatCurrency(invested),
         formatCurrency(returned),
@@ -456,7 +456,7 @@ export function History() {
               return (
                 <TableRow key={op.id}>
                   <TableCell>
-                    {format(new Date(op.date), 'dd/MM/yyyy', { locale: ptBR })}
+                    {format(parseISO(op.date), 'dd/MM/yyyy', { locale: ptBR })}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">

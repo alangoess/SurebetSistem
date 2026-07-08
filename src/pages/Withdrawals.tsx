@@ -28,8 +28,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Plus, Pencil, Trash2, ArrowUpFromLine } from 'lucide-react'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { toast } from 'sonner'
 
 interface House {
   id: string
@@ -116,7 +117,7 @@ export function Withdrawals() {
     try {
       const amount = parseFloat(formData.amount)
       if (!amount || amount <= 0) {
-        alert('Valor deve ser maior que zero')
+        toast.error('Valor deve ser maior que zero')
         return
       }
 
@@ -131,7 +132,7 @@ export function Withdrawals() {
         const newBalance = previousBalance - diff
 
         if (newBalance < 0) {
-          alert('Saldo não pode ficar negativo')
+          toast.error('Saldo não pode ficar negativo')
           return
         }
 
@@ -155,10 +156,31 @@ export function Withdrawals() {
           .eq('id', formData.house_id)
 
         if (houseError) throw houseError
+
+        // Update corresponding bank transaction (cash inflow)
+        const { data: existingTx } = await supabase
+          .from('bank_transactions')
+          .select('id')
+          .eq('description', `Saque: ${house.name}`)
+          .eq('amount', editingWithdrawal.amount)
+          .eq('date', editingWithdrawal.date)
+          .eq('type', 'deposit')
+          .single()
+
+        if (existingTx) {
+          await supabase
+            .from('bank_transactions')
+            .update({
+              amount,
+              date: formData.date,
+              description: `Saque: ${house.name}`,
+            })
+            .eq('id', existingTx.id)
+        }
       } else {
         // Check if house has enough balance
         if (house.balance < amount) {
-          alert('Saldo insuficiente na casa')
+          toast.error('Saldo insuficiente na casa')
           return
         }
 
@@ -179,13 +201,22 @@ export function Withdrawals() {
           .eq('id', formData.house_id)
 
         if (houseError) throw houseError
+
+        // Create corresponding bank transaction (cash inflow)
+        await supabase.from('bank_transactions').insert({
+          type: 'deposit',
+          amount,
+          date: formData.date,
+          description: `Saque: ${house.name}`,
+        })
       }
 
       setDialogOpen(false)
       loadData()
+      toast.success('Saque salvo com sucesso')
     } catch (error) {
       console.error('Error saving withdrawal:', error)
-      alert('Erro ao salvar saque')
+      toast.error('Erro ao salvar saque')
     }
   }
 
@@ -220,12 +251,27 @@ export function Withdrawals() {
 
       if (houseError) throw houseError
 
+      // Delete corresponding bank transaction
+      const { data: existingTx } = await supabase
+        .from('bank_transactions')
+        .select('id')
+        .eq('description', `Saque: ${house.name}`)
+        .eq('amount', withdrawalToDelete.amount)
+        .eq('date', withdrawalToDelete.date)
+        .eq('type', 'deposit')
+        .single()
+
+      if (existingTx) {
+        await supabase.from('bank_transactions').delete().eq('id', existingTx.id)
+      }
+
       setDeleteDialogOpen(false)
       setWithdrawalToDelete(null)
       loadData()
+      toast.success('Saque excluído')
     } catch (error) {
       console.error('Error deleting withdrawal:', error)
-      alert('Erro ao excluir saque')
+      toast.error('Erro ao excluir saque')
     }
   }
 
@@ -287,7 +333,7 @@ export function Withdrawals() {
               {formatCurrency(
                 withdrawals
                   .filter((w) => {
-                    const date = new Date(w.date)
+                    const date = parseISO(w.date)
                     const now = new Date()
                     return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()
                   })
@@ -321,7 +367,7 @@ export function Withdrawals() {
             {withdrawals.map((withdrawal) => (
               <TableRow key={withdrawal.id}>
                 <TableCell>
-                  {format(new Date(withdrawal.date), 'dd/MM/yyyy', { locale: ptBR })}
+                  {format(parseISO(withdrawal.date), 'dd/MM/yyyy', { locale: ptBR })}
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">

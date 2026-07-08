@@ -13,6 +13,7 @@ import {
   LogOut,
   Menu,
   X,
+  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
@@ -22,6 +23,7 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/houses', label: 'Casas', icon: Building2 },
   { to: '/operations', label: 'Operações', icon: Receipt },
+  { to: '/cash', label: 'Caixa', icon: Wallet },
   { to: '/deposits', label: 'Depósitos', icon: ArrowDownToLine },
   { to: '/withdrawals', label: 'Saques', icon: ArrowUpFromLine },
   { to: '/history', label: 'Histórico', icon: History },

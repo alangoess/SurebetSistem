@@ -7,6 +7,7 @@ import { Houses } from '@/pages/Houses'
 import { Operations } from '@/pages/Operations'
 import { Deposits } from '@/pages/Deposits'
 import { Withdrawals } from '@/pages/Withdrawals'
+import { CashRegister } from '@/pages/CashRegister'
 import { History } from '@/pages/History'
 import { Calculators } from '@/pages/Calculators'
 import { Reports } from '@/pages/Reports'
@@ -70,6 +71,7 @@ function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="houses" element={<Houses />} />
         <Route path="operations" element={<Operations />} />
+        <Route path="cash" element={<CashRegister />} />
         <Route path="deposits" element={<Deposits />} />
         <Route path="withdrawals" element={<Withdrawals />} />
         <Route path="history" element={<History />} />

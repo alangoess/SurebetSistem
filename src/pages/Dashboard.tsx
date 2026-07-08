@@ -7,10 +7,8 @@ import {
   TrendingDown,
   DollarSign,
   BarChart3,
-  PiggyBank,
-  Activity,
   Building2,
-  Wallet,
+  Activity,
 } from 'lucide-react'
 import {
   LineChart,
@@ -26,7 +24,7 @@ import {
   Pie,
   Cell,
 } from 'recharts'
-import { format, subDays, startOfWeek, startOfMonth, isWithinInterval } from 'date-fns'
+import { format, parseISO, subDays, startOfWeek, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 interface House {
@@ -41,11 +39,12 @@ interface Operation {
   id: string
   date: string
   status: string
-  desired_return: number | null
+  actual_profit: number | null
   entries: {
     stake: number
     odd: number
     bet_type: string
+    bet_side: string
     house_id: string
   }[]
 }
@@ -55,7 +54,7 @@ interface Stats {
   weekProfit: number
   monthProfit: number
   totalStaked: number
-  totalReturned: number
+  totalProfit: number
   bankroll: number
   housesTotal: number
   operationsCount: number
@@ -63,6 +62,14 @@ interface Stats {
 }
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899']
+
+// BACK/LAY calculation helpers
+function getEntryInvestment(entry: { stake: number; odd: number; bet_side: string }): number {
+  if (entry.bet_side === 'LAY') {
+    return entry.stake * (entry.odd - 1) // Liability
+  }
+  return entry.stake
+}
 
 export function Dashboard() {
   const [loading, setLoading] = useState(true)
@@ -73,7 +80,7 @@ export function Dashboard() {
     weekProfit: 0,
     monthProfit: 0,
     totalStaked: 0,
-    totalReturned: 0,
+    totalProfit: 0,
     bankroll: 0,
     housesTotal: 0,
     operationsCount: 0,
@@ -94,8 +101,8 @@ export function Dashboard() {
             id,
             date,
             status,
-            desired_return,
-            entries:operation_entries(stake, odd, bet_type, house_id)
+            actual_profit,
+            entries:operation_entries(stake, odd, bet_type, bet_side, house_id)
           `)
           .eq('status', 'completed')
           .order('date', { ascending: false }),
@@ -123,34 +130,32 @@ export function Dashboard() {
     let weekProfit = 0
     let monthProfit = 0
     let totalStaked = 0
-    let totalReturned = 0
-    let todayOps = 0
-    let weekOps = 0
-    let monthOps = 0
+    let totalProfit = 0
 
     ops.forEach((op) => {
-      const opDate = new Date(op.date)
-      const { invested, returned } = calculateOperationProfit(op)
-      const profit = returned - invested
+      const opDate = parseISO(op.date)
+
+      // Calculate total investment for this operation
+      const invested = op.entries.reduce((sum, e) => sum + getEntryInvestment(e), 0)
+
+      // Use actual_profit if available (settled operations)
+      const profit = op.actual_profit !== null ? op.actual_profit : 0
 
       totalStaked += invested
-      totalReturned += returned
+      totalProfit += profit
 
       if (opDate >= todayStart) {
         todayProfit += profit
-        todayOps++
       }
       if (opDate >= weekStart) {
         weekProfit += profit
-        weekOps++
       }
       if (opDate >= monthStart) {
         monthProfit += profit
-        monthOps++
       }
     })
 
-    const roi = totalStaked > 0 ? ((totalReturned - totalStaked) / totalStaked) * 100 : 0
+    const roi = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0
     const totalBalance = housesList.reduce((sum, h) => sum + (h.balance || 0), 0)
 
     setStats({
@@ -158,28 +163,12 @@ export function Dashboard() {
       weekProfit,
       monthProfit,
       totalStaked,
-      totalReturned,
+      totalProfit,
       bankroll: totalBalance,
       housesTotal: housesList.length,
       operationsCount: ops.length,
       roi,
     })
-  }
-
-  const calculateOperationProfit = (op: Operation) => {
-    let invested = 0
-    let returned = 0
-
-    op.entries?.forEach((entry) => {
-      invested += entry.stake
-      if (entry.bet_type === 'freebet') {
-        returned += entry.stake * (entry.odd - 1)
-      } else {
-        returned += entry.stake * entry.odd
-      }
-    })
-
-    return { invested, returned }
   }
 
   const formatCurrency = (value: number) => {
@@ -189,19 +178,15 @@ export function Dashboard() {
     }).format(value)
   }
 
-  // Chart data
+  // Chart data - last 30 days
   const last30Days = Array.from({ length: 30 }, (_, i) => subDays(new Date(), 29 - i))
   const profitByDay = last30Days.map((date) => {
     const dayOps = operations.filter((op) => {
-      const opDate = new Date(op.date)
+      const opDate = parseISO(op.date)
       return opDate.toDateString() === date.toDateString()
     })
 
-    let dayProfit = 0
-    dayOps.forEach((op) => {
-      const { invested, returned } = calculateOperationProfit(op)
-      dayProfit += returned - invested
-    })
+    const dayProfit = dayOps.reduce((sum, op) => sum + (op.actual_profit || 0), 0)
 
     return {
       date: format(date, 'dd/MM'),
@@ -209,19 +194,20 @@ export function Dashboard() {
     }
   })
 
+  // Profit by house
   const profitByHouse = houses.map((house) => {
     let houseProfit = 0
+
     operations.forEach((op) => {
-      op.entries?.forEach((entry) => {
-        if (entry.house_id === house.id) {
-          if (entry.bet_type === 'freebet') {
-            houseProfit += entry.stake * (entry.odd - 1)
-          } else {
-            houseProfit += entry.stake * entry.odd - entry.stake
-          }
-        }
-      })
+      // Find entries for this house
+      const houseEntries = op.entries.filter(e => e.house_id === house.id)
+      if (houseEntries.length > 0 && op.actual_profit !== null) {
+        // This house was part of this winning operation
+        // The profit impact is proportional to their share of the operation
+        houseProfit += op.actual_profit
+      }
     })
+
     return {
       name: house.name,
       value: houseProfit,
@@ -229,6 +215,7 @@ export function Dashboard() {
     }
   }).filter((h) => h.value !== 0)
 
+  // Balance distribution
   const balanceDistribution = houses.map((house) => ({
     name: house.name,
     value: house.balance || 0,
@@ -302,7 +289,7 @@ export function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">ROI</CardTitle>
+            <CardTitle className="text-sm font-medium">ROI Total</CardTitle>
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -314,7 +301,7 @@ export function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Apostado</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Investido</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -324,11 +311,13 @@ export function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Retornado</CardTitle>
+            <CardTitle className="text-sm font-medium">Lucro Total</CardTitle>
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(stats.totalReturned)}</div>
+            <div className={cn('text-2xl font-bold', stats.totalProfit >= 0 ? 'text-green-600' : 'text-red-600')}>
+              {formatCurrency(stats.totalProfit)}
+            </div>
           </CardContent>
         </Card>
 
@@ -344,7 +333,7 @@ export function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Operações</CardTitle>
+            <CardTitle className="text-sm font-medium">Operações Concluídas</CardTitle>
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -451,7 +440,9 @@ export function Dashboard() {
                     <span className="font-medium">{house.name}</span>
                   </div>
                   <div className="text-right">
-                    <div className="font-bold">{formatCurrency(house.balance)}</div>
+                    <div className={cn('font-bold', house.balance >= 0 ? '' : 'text-red-600')}>
+                      {formatCurrency(house.balance)}
+                    </div>
                     <Badge variant={house.status === 'active' ? 'success' : 'secondary'}>
                       {house.status === 'active' ? 'Ativa' : 'Inativa'}
                     </Badge>

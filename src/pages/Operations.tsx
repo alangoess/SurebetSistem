@@ -29,7 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Plus, Pencil, Trash2, Eye, CheckCircle2 } from 'lucide-react'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { toast } from 'sonner'
 
@@ -37,6 +37,7 @@ interface House {
   id: string
   name: string
   color: string
+  balance: number
 }
 
 interface OperationEntry {
@@ -49,7 +50,6 @@ interface OperationEntry {
   odd: number
   stake: number
   house?: House
-  is_winner?: boolean
 }
 
 interface Operation {
@@ -58,9 +58,8 @@ interface Operation {
   desired_return: number | null
   notes: string | null
   status: string
-  winning_entry_id: string | null
+  actual_profit: number | null
   entries: OperationEntry[]
-  actual_profit?: number | null
 }
 
 const initialEntry: OperationEntry = {
@@ -71,28 +70,6 @@ const initialEntry: OperationEntry = {
   bet_side: 'BACK',
   odd: 1.0,
   stake: 0,
-}
-
-// Função para formatar data como texto puro, ignorando completamente problemas de fuso horário (Timezone)
-function formatarDataPura(dateStr: string | undefined | null): string {
-  if (!dateStr) return '-'
-  
-  // Se vier do banco com fuso horário (ex: T00:00:00Z), criamos o objeto e pegamos o dia local correto
-  const dataObjeto = new Date(dateStr);
-  
-  // Se a data for inválida, tenta o fallback manual
-  if (isNaN(dataObjeto.getTime())) {
-    const dataLimpa = dateStr.substring(0, 10)
-    const partes = dataLimpa.split('-')
-    return partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : dateStr
-  }
-
-  // Pega o dia, mês e ano local do navegador, sem deslocamento de fuso
-  const dia = String(dataObjeto.getDate()).padStart(2, '0');
-  const mes = String(dataObjeto.getMonth() + 1).padStart(2, '0'); // Meses começam em 0
-  const ano = dataObjeto.getFullYear();
-
-  return `${dia}/${mes}/${ano}`;
 }
 
 // Utility functions for BACK/LAY calculations
@@ -109,10 +86,19 @@ function getLayLiability(stake: number, odd: number): number {
   return stake * (odd - 1)
 }
 
+function getLayInvestment(stake: number, odd: number): number {
+  return getLayLiability(stake, odd)
+}
+
+function getLayReturn(stake: number, odd: number): number {
+  // If LAY wins: you receive the stake (what you wanted to win) + your liability back
+  return stake + getLayLiability(stake, odd)
+}
+
 // Calculate investment for a single entry
 function getEntryInvestment(entry: OperationEntry): number {
   if (entry.bet_side === 'LAY') {
-    return getLayLiability(entry.stake, entry.odd)
+    return getLayInvestment(entry.stake, entry.odd)
   }
   return getBackInvestment(entry.stake)
 }
@@ -128,7 +114,7 @@ function getEntryReturn(entry: OperationEntry): number {
   }
 
   if (entry.bet_side === 'LAY') {
-    return entry.stake + getLayLiability(entry.stake, entry.odd)
+    return getLayReturn(entry.stake, entry.odd)
   }
   return getBackReturn(entry.stake, entry.odd)
 }
@@ -138,17 +124,14 @@ function getTotalInvestment(entries: OperationEntry[]): number {
   return entries.reduce((sum, entry) => sum + getEntryInvestment(entry), 0)
 }
 
-// Calculate actual profit based on winning entry
-function calculateActualProfit(entries: OperationEntry[], winningEntryId: string | null): number | null {
-  if (!winningEntryId) return null
-
+// Calculate scenario profits for surebet analysis
+function calculateScenarioProfits(entries: OperationEntry[]): { entry: OperationEntry; profit: number }[] {
   const totalInvestment = getTotalInvestment(entries)
-  const winningEntry = entries.find(e => e.id === winningEntryId)
 
-  if (!winningEntry) return null
-
-  const winningReturn = getEntryReturn(winningEntry)
-  return winningReturn - totalInvestment
+  return entries.map(entry => ({
+    entry,
+    profit: getEntryReturn(entry) - totalInvestment
+  }))
 }
 
 export function Operations() {
@@ -187,7 +170,7 @@ export function Operations() {
             desired_return,
             notes,
             status,
-            winning_entry_id,
+            actual_profit,
             entries:operation_entries(
               id,
               house_id,
@@ -200,7 +183,7 @@ export function Operations() {
             )
           `)
           .order('date', { ascending: false }),
-        supabase.from('houses').select('id, name, color'),
+        supabase.from('houses').select('id, name, color, balance'),
       ])
 
       if (opsRes.data) {
@@ -210,10 +193,6 @@ export function Operations() {
             ...e,
             house: housesRes.data?.find((h) => h.id === e.house_id),
           })) || [],
-          actual_profit: calculateActualProfit(
-            op.entries?.map((e: any) => ({ ...e, id: e.id })) || [],
-            op.winning_entry_id
-          )
         }))
         setOperations(formattedOps)
       }
@@ -229,8 +208,7 @@ export function Operations() {
     if (operation) {
       setEditingOperation(operation)
       setFormData({
-        // Garante que o input tipo date receba APENAS "YYYY-MM-DD", ignorando horas e fusos
-        date: operation.date ? operation.date.substring(0, 10) : format(new Date(), 'yyyy-MM-dd'),
+        date: operation.date,
         desired_return: operation.desired_return?.toString() || '',
         notes: operation.notes || '',
         status: operation.status,
@@ -273,13 +251,18 @@ export function Operations() {
   const calculateOperationTotals = () => {
     const totalInvested = getTotalInvestment(entries)
 
+    // For pending operations, show the worst-case scenario or average
     const scenarioProfits = entries.map(entry => {
       const totalInv = getTotalInvestment(entries)
       return getEntryReturn(entry) - totalInv
     })
 
+    // Average profit across all scenarios
     const avgProfit = scenarioProfits.reduce((a, b) => a + b, 0) / scenarioProfits.length
+
     const roi = totalInvested > 0 ? (avgProfit / totalInvested) * 100 : 0
+
+    // Total return if all scenarios were equal (theoretical)
     const totalReturned = entries.reduce((sum, entry) => sum + getEntryReturn(entry), 0)
 
     return {
@@ -307,7 +290,7 @@ export function Operations() {
 
         if (opError) throw opError
 
-        const { error: deleteError = null } = await supabase
+        const { error: deleteError } = await supabase
           .from('operation_entries')
           .delete()
           .eq('operation_id', editingOperation.id)
@@ -325,24 +308,11 @@ export function Operations() {
           stake: e.stake,
         }))
 
-        const { data: insertedEntries, error: entriesError } = await supabase
+        const { error: entriesError } = await supabase
           .from('operation_entries')
           .insert(entriesData)
-          .select()
 
         if (entriesError) throw entriesError
-
-        if (editingOperation.winning_entry_id) {
-          const matchingEntry = insertedEntries?.find((_, idx) =>
-            editingOperation.entries[idx]?.id === editingOperation.winning_entry_id
-          )
-          if (matchingEntry) {
-            await supabase
-              .from('operations')
-              .update({ winning_entry_id: matchingEntry.id })
-              .eq('id', editingOperation.id)
-          }
-        }
       } else {
         const { data: newOp, error: opError } = await supabase
           .from('operations')
@@ -424,7 +394,7 @@ export function Operations() {
         house: houses.find((h) => h.id === e.house_id),
       })),
     })
-    setSelectedWinningEntry(operation.winning_entry_id || '')
+    setSelectedWinningEntry('')
     setSettleDialogOpen(true)
   }
 
@@ -432,20 +402,59 @@ export function Operations() {
     if (!operationToSettle || !selectedWinningEntry) return
 
     try {
-      const { error } = await supabase
+      const winningEntry = operationToSettle.entries.find(e => e.id === selectedWinningEntry)
+      if (!winningEntry) throw new Error('Entry not found')
+
+      const totalInvestment = getTotalInvestment(operationToSettle.entries)
+      const winningReturn = getEntryReturn(winningEntry)
+      const actualProfit = winningReturn - totalInvestment
+
+      // Update operation status and actual_profit
+      const { error: opError } = await supabase
         .from('operations')
         .update({
           status: 'completed',
-          winning_entry_id: selectedWinningEntry
+          actual_profit: actualProfit
         })
         .eq('id', operationToSettle.id)
 
-      if (error) throw error
+      if (opError) throw opError
+
+      // Update house balances:
+      // 1. Deduct investments from all houses
+      // 2. Add return to winning house
+
+      // First, gather all balance changes
+      const balanceChanges: Record<string, number> = {}
+
+      // Deduct each entry's investment from its house
+      for (const entry of operationToSettle.entries) {
+        const investment = getEntryInvestment(entry)
+        const entryHouseId = entry.house_id
+        balanceChanges[entryHouseId] = (balanceChanges[entryHouseId] || 0) - investment
+      }
+
+      // Add the winning return to the winning entry's house
+      balanceChanges[winningEntry.house_id] = (balanceChanges[winningEntry.house_id] || 0) + winningReturn
+
+      // Apply all balance changes
+      for (const [houseId, change] of Object.entries(balanceChanges)) {
+        const house = houses.find(h => h.id === houseId)
+        if (house) {
+          const newBalance = house.balance + change
+          const { error: houseError } = await supabase
+            .from('houses')
+            .update({ balance: newBalance })
+            .eq('id', houseId)
+
+          if (houseError) throw houseError
+        }
+      }
 
       setSettleDialogOpen(false)
       setOperationToSettle(null)
       loadData()
-      toast.success('Operação finalizada com sucesso')
+      toast.success(`Operação finalizada! Lucro: ${formatCurrency(actualProfit)}`)
     } catch (error) {
       console.error('Error settling operation:', error)
       toast.error('Erro ao finalizar operação')
@@ -455,6 +464,7 @@ export function Operations() {
   const updateOperationStatus = async (operationId: string, newStatus: string) => {
     const operation = operations.find(op => op.id === operationId)
 
+    // If changing to completed, open settle dialog
     if (newStatus === 'completed' && operation?.status === 'pending') {
       openSettleDialog(operation)
       return
@@ -512,7 +522,7 @@ export function Operations() {
               <TableHead>Data</TableHead>
               <TableHead>Entradas</TableHead>
               <TableHead>Investido</TableHead>
-              <TableHead>Lucro/Loss</TableHead>
+              <TableHead>Lucro</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
@@ -520,13 +530,13 @@ export function Operations() {
           <TableBody>
             {operations.map((op) => {
               const invested = getTotalInvestment(op.entries)
-              const profit = op.actual_profit ?? calculateOperationTotals().profit
-              const winningEntry = op.entries.find(e => e.id === op.winning_entry_id)
+              const profit = op.actual_profit
+              const isCompleted = op.status === 'completed' && op.actual_profit !== null
 
               return (
                 <TableRow key={op.id}>
                   <TableCell>
-                    {formatarDataPura(op.date)}
+                    {format(parseISO(op.date), 'dd/MM/yyyy', { locale: ptBR })}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -534,7 +544,6 @@ export function Operations() {
                         <Badge
                           key={idx}
                           variant="outline"
-                          className={e.id === op.winning_entry_id ? 'border-green-500 text-green-600' : ''}
                         >
                           {e.house?.name || 'Casa'}
                           <span className="ml-1 text-xs">
@@ -546,18 +555,15 @@ export function Operations() {
                   </TableCell>
                   <TableCell>{formatCurrency(invested)}</TableCell>
                   <TableCell>
-                    {op.status === 'completed' && op.winning_entry_id ? (
+                    {isCompleted ? (
                       <div>
-                        <span className={profit >= 0 ? 'text-green-600' : 'text-red-600 font-bold'}>
-                          {formatCurrency(profit)}
+                        <span className={profit! >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+                          {formatCurrency(profit!)}
                         </span>
-                        <div className="text-xs text-muted-foreground">
-                          Green: {winningEntry?.house?.name} ({winningEntry?.bet_side})
-                        </div>
                       </div>
                     ) : (
-                      <span className="text-muted-foreground">
-                        ~{formatCurrency(profit)}
+                      <span className="text-muted-foreground italic">
+                        Aguardando...
                       </span>
                     )}
                   </TableCell>
@@ -572,15 +578,15 @@ export function Operations() {
                             op.status === 'completed'
                               ? 'success'
                               : op.status === 'cancelled'
-                                ? 'destructive'
-                                : 'secondary'
+                              ? 'destructive'
+                              : 'secondary'
                           }
                         >
                           {op.status === 'completed'
                             ? 'Concluída'
                             : op.status === 'cancelled'
-                              ? 'Cancelada'
-                              : 'Pendente'}
+                            ? 'Cancelada'
+                            : 'Pendente'}
                         </Badge>
                       </SelectTrigger>
                       <SelectContent>
@@ -911,7 +917,7 @@ export function Operations() {
                 <div>
                   <span className="text-muted-foreground">Data: </span>
                   <span className="font-medium">
-                    {formatarDataPura(operationToView.date)}
+                    {format(parseISO(operationToView.date), 'dd/MM/yyyy', { locale: ptBR })}
                   </span>
                 </div>
                 <div>
@@ -921,15 +927,15 @@ export function Operations() {
                       operationToView.status === 'completed'
                         ? 'success'
                         : operationToView.status === 'cancelled'
-                          ? 'destructive'
-                          : 'secondary'
+                        ? 'destructive'
+                        : 'secondary'
                     }
                   >
                     {operationToView.status === 'completed'
                       ? 'Concluída'
                       : operationToView.status === 'cancelled'
-                        ? 'Cancelada'
-                        : 'Pendente'}
+                      ? 'Cancelada'
+                      : 'Pendente'}
                   </Badge>
                 </div>
                 {operationToView.desired_return && (
@@ -963,10 +969,7 @@ export function Operations() {
                 </TableHeader>
                 <TableBody>
                   {operationToView.entries.map((entry, index) => (
-                    <TableRow
-                      key={index}
-                      className={entry.id === operationToView.winning_entry_id ? 'bg-green-50' : ''}
-                    >
+                    <TableRow key={index}>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <div
@@ -1024,21 +1027,23 @@ export function Operations() {
           </DialogHeader>
 
           <p className="text-muted-foreground">
-            Selecione qual entrada foi a vencedora para calcular o lucro real:
+            Selecione qual entrada foi a vencedora para calcular o lucro real e atualizar os saldos:
           </p>
 
           {operationToSettle && (
             <div className="space-y-4">
               <div className="space-y-2">
                 {operationToSettle.entries.map((entry) => {
-                  const profit = getEntryReturn(entry) - getTotalInvestment(operationToSettle.entries)
+                  const totalInvestment = getTotalInvestment(operationToSettle.entries)
+                  const profit = getEntryReturn(entry) - totalInvestment
                   return (
                     <div
                       key={entry.id}
-                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${selectedWinningEntry === entry.id
+                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                        selectedWinningEntry === entry.id
                           ? 'border-green-500 bg-green-50'
                           : 'hover:bg-muted'
-                        }`}
+                      }`}
                       onClick={() => setSelectedWinningEntry(entry.id || '')}
                     >
                       <div className="flex items-center justify-between">
@@ -1057,8 +1062,7 @@ export function Operations() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className={`font-bold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}
-                          >
+                          <div className={`font-bold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {formatCurrency(profit)}
                           </div>
                           <div className="text-xs text-muted-foreground">lucro</div>
@@ -1080,14 +1084,18 @@ export function Operations() {
                     </div>
                     <div className="flex justify-between">
                       <span>Lucro Final:</span>
-                      <span className={`font-bold ${(getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
-                          getTotalInvestment(operationToSettle.entries)) >= 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
+                      <span className={`font-bold ${
+                        (getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
+                        getTotalInvestment(operationToSettle.entries)) >= 0 ? 'text-green-600' : 'text-red-600'
+                      }`}>
                         {formatCurrency(
                           getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
                           getTotalInvestment(operationToSettle.entries)
                         )}
                       </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-2 border-t pt-2">
+                      Os saldos das casas serão atualizados automaticamente.
                     </div>
                   </div>
                 </div>

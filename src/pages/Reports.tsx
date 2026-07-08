@@ -35,7 +35,7 @@ import {
   Cell,
 } from 'recharts'
 import { Download, FileText, TrendingUp, TrendingDown, Calendar } from 'lucide-react'
-import { format, subDays, startOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns'
+import { format, parseISO, subDays, startOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 interface House {
@@ -135,7 +135,7 @@ export function Reports() {
 
   const getFilteredOperations = () => {
     return operations.filter((op) => {
-      const date = new Date(op.date)
+      const date = parseISO(op.date)
       if (startDate && date < new Date(startDate)) return false
       if (endDate && date > new Date(endDate)) return false
       return true
@@ -161,7 +161,7 @@ export function Reports() {
     const days = eachDayOfInterval({ start, end })
 
     return days.map((day) => {
-      const dayOps = filtered.filter((op) => new Date(op.date).toDateString() === day.toDateString())
+      const dayOps = filtered.filter((op) => parseISO(op.date).toDateString() === day.toDateString())
       const dayProfit = dayOps.reduce((sum, op) => sum + calculateOperationProfit(op).profit, 0)
       return {
         date: format(day, 'dd/MM'),
@@ -228,7 +228,7 @@ export function Reports() {
       }).join('; ')
 
       return [
-        format(new Date(op.date), 'dd/MM/yyyy'),
+        format(parseISO(op.date), 'dd/MM/yyyy'),
         invested.toFixed(2),
         returned.toFixed(2),
         profit.toFixed(2),
@@ -456,7 +456,7 @@ export function Reports() {
                     <div className="flex items-center gap-3">
                       <Badge variant={i < 3 ? 'success' : 'secondary'}>{i + 1}</Badge>
                       <div>
-                        <p className="font-medium">{format(new Date(op.date), 'dd/MM/yyyy')}</p>
+                        <p className="font-medium">{format(parseISO(op.date), 'dd/MM/yyyy')}</p>
                         <p className="text-sm text-muted-foreground">{op.entries.length} entradas</p>
                       </div>
                     </div>

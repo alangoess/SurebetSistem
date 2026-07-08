@@ -28,8 +28,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Plus, Pencil, Trash2, ArrowDownToLine } from 'lucide-react'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { toast } from 'sonner'
 
 interface House {
   id: string
@@ -116,7 +117,7 @@ export function Deposits() {
     try {
       const amount = parseFloat(formData.amount)
       if (!amount || amount <= 0) {
-        alert('Valor deve ser maior que zero')
+        toast.error('Valor deve ser maior que zero')
         return
       }
 
@@ -130,7 +131,7 @@ export function Deposits() {
         const newBalance = house.balance + diff
 
         if (newBalance < 0) {
-          alert('Saldo não pode ficar negativo')
+          toast.error('Saldo não pode ficar negativo')
           return
         }
 
@@ -154,6 +155,27 @@ export function Deposits() {
           .eq('id', formData.house_id)
 
         if (houseError) throw houseError
+
+        // Update corresponding bank transaction (cash outflow)
+        const { data: existingTx } = await supabase
+          .from('bank_transactions')
+          .select('id')
+          .eq('description', `Depósito: ${house.name}`)
+          .eq('amount', editingDeposit.amount)
+          .eq('date', editingDeposit.date)
+          .eq('type', 'withdrawal')
+          .single()
+
+        if (existingTx) {
+          await supabase
+            .from('bank_transactions')
+            .update({
+              amount,
+              date: formData.date,
+              description: `Depósito: ${house.name}`,
+            })
+            .eq('id', existingTx.id)
+        }
       } else {
         // Create deposit
         const { error: depError } = await supabase.from('deposits').insert({
@@ -172,13 +194,22 @@ export function Deposits() {
           .eq('id', formData.house_id)
 
         if (houseError) throw houseError
+
+        // Create corresponding bank transaction (cash outflow)
+        await supabase.from('bank_transactions').insert({
+          type: 'withdrawal',
+          amount,
+          date: formData.date,
+          description: `Depósito: ${house.name}`,
+        })
       }
 
       setDialogOpen(false)
       loadData()
+      toast.success('Depósito salvo com sucesso')
     } catch (error) {
       console.error('Error saving deposit:', error)
-      alert('Erro ao salvar depósito')
+      toast.error('Erro ao salvar depósito')
     }
   }
 
@@ -196,7 +227,7 @@ export function Deposits() {
 
       const newBalance = house.balance - depositToDelete.amount
       if (newBalance < 0) {
-        alert('Não é possível excluir: saldo ficaria negativo')
+        toast.error('Não é possível excluir: saldo ficaria negativo')
         setDeleteDialogOpen(false)
         return
       }
@@ -217,12 +248,27 @@ export function Deposits() {
 
       if (houseError) throw houseError
 
+      // Delete corresponding bank transaction
+      const { data: existingTx } = await supabase
+        .from('bank_transactions')
+        .select('id')
+        .eq('description', `Depósito: ${house.name}`)
+        .eq('amount', depositToDelete.amount)
+        .eq('date', depositToDelete.date)
+        .eq('type', 'withdrawal')
+        .single()
+
+      if (existingTx) {
+        await supabase.from('bank_transactions').delete().eq('id', existingTx.id)
+      }
+
       setDeleteDialogOpen(false)
       setDepositToDelete(null)
       loadData()
+      toast.success('Depósito excluído')
     } catch (error) {
       console.error('Error deleting deposit:', error)
-      alert('Erro ao excluir depósito')
+      toast.error('Erro ao excluir depósito')
     }
   }
 
@@ -284,7 +330,7 @@ export function Deposits() {
               {formatCurrency(
                 deposits
                   .filter((d) => {
-                    const date = new Date(d.date)
+                    const date = parseISO(d.date)
                     const now = new Date()
                     return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()
                   })
@@ -318,7 +364,7 @@ export function Deposits() {
             {deposits.map((deposit) => (
               <TableRow key={deposit.id}>
                 <TableCell>
-                  {format(new Date(deposit.date), 'dd/MM/yyyy', { locale: ptBR })}
+                  {format(parseISO(deposit.date), 'dd/MM/yyyy', { locale: ptBR })}
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
