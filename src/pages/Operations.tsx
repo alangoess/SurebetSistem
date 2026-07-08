@@ -73,6 +73,18 @@ const initialEntry: OperationEntry = {
   stake: 0,
 }
 
+// Função para formatar data como texto puro, ignorando completamente problemas de fuso horário (Timezone)
+function formatarDataPura(dateStr: string | undefined | null): string {
+  if (!dateStr) return '-'
+  const dataLimpa = dateStr.substring(0, 10)
+  const partes = dataLimpa.split('-')
+  if (partes.length === 3) {
+    const [ano, mes, dia] = partes
+    return `${dia}/${mes}/${ano}`
+  }
+  return dateStr
+}
+
 // Utility functions for BACK/LAY calculations
 function getBackInvestment(stake: number): number {
   return stake
@@ -87,19 +99,10 @@ function getLayLiability(stake: number, odd: number): number {
   return stake * (odd - 1)
 }
 
-function getLayInvestment(stake: number, odd: number): number {
-  return getLayLiability(stake, odd)
-}
-
-function getLayReturn(stake: number, odd: number): number {
-  // If LAY wins: you receive the stake (what you wanted to win) + your liability back
-  return stake + getLayLiability(stake, odd)
-}
-
 // Calculate investment for a single entry
 function getEntryInvestment(entry: OperationEntry): number {
   if (entry.bet_side === 'LAY') {
-    return getLayInvestment(entry.stake, entry.odd)
+    return getLayLiability(entry.stake, entry.odd)
   }
   return getBackInvestment(entry.stake)
 }
@@ -115,7 +118,7 @@ function getEntryReturn(entry: OperationEntry): number {
   }
 
   if (entry.bet_side === 'LAY') {
-    return getLayReturn(entry.stake, entry.odd)
+    return entry.stake + getLayLiability(entry.stake, entry.odd)
   }
   return getBackReturn(entry.stake, entry.odd)
 }
@@ -136,16 +139,6 @@ function calculateActualProfit(entries: OperationEntry[], winningEntryId: string
 
   const winningReturn = getEntryReturn(winningEntry)
   return winningReturn - totalInvestment
-}
-
-// Calculate scenario profits for surebet analysis
-function calculateScenarioProfits(entries: OperationEntry[]): { entryId: string; profit: number }[] {
-  const totalInvestment = getTotalInvestment(entries)
-
-  return entries.map(entry => ({
-    entryId: entry.id || '',
-    profit: getEntryReturn(entry) - totalInvestment
-  }))
 }
 
 export function Operations() {
@@ -269,18 +262,13 @@ export function Operations() {
   const calculateOperationTotals = () => {
     const totalInvested = getTotalInvestment(entries)
 
-    // For pending operations, show the worst-case scenario or average
     const scenarioProfits = entries.map(entry => {
       const totalInv = getTotalInvestment(entries)
       return getEntryReturn(entry) - totalInv
     })
 
-    // Average profit across all scenarios
     const avgProfit = scenarioProfits.reduce((a, b) => a + b, 0) / scenarioProfits.length
-
     const roi = totalInvested > 0 ? (avgProfit / totalInvested) * 100 : 0
-
-    // Total return if all scenarios were equal (theoretical)
     const totalReturned = entries.reduce((sum, entry) => sum + getEntryReturn(entry), 0)
 
     return {
@@ -308,7 +296,7 @@ export function Operations() {
 
         if (opError) throw opError
 
-        const { error: deleteError } = await supabase
+        const { error: deleteError = null } = await supabase
           .from('operation_entries')
           .delete()
           .eq('operation_id', editingOperation.id)
@@ -333,7 +321,6 @@ export function Operations() {
 
         if (entriesError) throw entriesError
 
-        // Restore winning_entry_id if it exists and matches an entry
         if (editingOperation.winning_entry_id) {
           const matchingEntry = insertedEntries?.find((_, idx) =>
             editingOperation.entries[idx]?.id === editingOperation.winning_entry_id
@@ -457,7 +444,6 @@ export function Operations() {
   const updateOperationStatus = async (operationId: string, newStatus: string) => {
     const operation = operations.find(op => op.id === operationId)
 
-    // If changing to completed, open settle dialog
     if (newStatus === 'completed' && operation?.status === 'pending') {
       openSettleDialog(operation)
       return
@@ -529,7 +515,7 @@ export function Operations() {
               return (
                 <TableRow key={op.id}>
                   <TableCell>
-                    {format(new Date(`${op.date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR })}
+                    {formatarDataPura(op.date)}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -575,15 +561,15 @@ export function Operations() {
                             op.status === 'completed'
                               ? 'success'
                               : op.status === 'cancelled'
-                                ? 'destructive'
-                                : 'secondary'
+                              ? 'destructive'
+                              : 'secondary'
                           }
                         >
                           {op.status === 'completed'
                             ? 'Concluída'
                             : op.status === 'cancelled'
-                              ? 'Cancelada'
-                              : 'Pendente'}
+                            ? 'Cancelada'
+                            : 'Pendente'}
                         </Badge>
                       </SelectTrigger>
                       <SelectContent>
@@ -914,7 +900,7 @@ export function Operations() {
                 <div>
                   <span className="text-muted-foreground">Data: </span>
                   <span className="font-medium">
-                    {format(new Date(`${operationToView.date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR })}
+                    {formatarDataPura(operationToView.date)}
                   </span>
                 </div>
                 <div>
@@ -924,15 +910,15 @@ export function Operations() {
                       operationToView.status === 'completed'
                         ? 'success'
                         : operationToView.status === 'cancelled'
-                          ? 'destructive'
-                          : 'secondary'
+                        ? 'destructive'
+                        : 'secondary'
                     }
                   >
                     {operationToView.status === 'completed'
                       ? 'Concluída'
                       : operationToView.status === 'cancelled'
-                        ? 'Cancelada'
-                        : 'Pendente'}
+                      ? 'Cancelada'
+                      : 'Pendente'}
                   </Badge>
                 </div>
                 {operationToView.desired_return && (
@@ -1038,10 +1024,11 @@ export function Operations() {
                   return (
                     <div
                       key={entry.id}
-                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${selectedWinningEntry === entry.id
-                        ? 'border-green-500 bg-green-50'
-                        : 'hover:bg-muted'
-                        }`}
+                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                        selectedWinningEntry === entry.id
+                          ? 'border-green-500 bg-green-50'
+                          : 'hover:bg-muted'
+                      }`}
                       onClick={() => setSelectedWinningEntry(entry.id || '')}
                     >
                       <div className="flex items-center justify-between">
@@ -1060,7 +1047,8 @@ export function Operations() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className={`font-bold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          <div className={`font-bold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                          >
                             {formatCurrency(profit)}
                           </div>
                           <div className="text-xs text-muted-foreground">lucro</div>
@@ -1082,9 +1070,10 @@ export function Operations() {
                     </div>
                     <div className="flex justify-between">
                       <span>Lucro Final:</span>
-                      <span className={`font-bold ${(getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
+                      <span className={`font-bold ${
+                        (getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
                         getTotalInvestment(operationToSettle.entries)) >= 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
+                      }`}>
                         {formatCurrency(
                           getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
                           getTotalInvestment(operationToSettle.entries)
