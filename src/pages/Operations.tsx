@@ -529,7 +529,7 @@ export function Operations() {
               return (
                 <TableRow key={op.id}>
                   <TableCell>
-                    {format(new Date(op.date), 'dd/MM/yyyy', { locale: ptBR })}
+                    {format(new Date(`${op.date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR })}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -575,15 +575,15 @@ export function Operations() {
                             op.status === 'completed'
                               ? 'success'
                               : op.status === 'cancelled'
-                              ? 'destructive'
-                              : 'secondary'
+                                ? 'destructive'
+                                : 'secondary'
                           }
                         >
                           {op.status === 'completed'
                             ? 'Concluída'
                             : op.status === 'cancelled'
-                            ? 'Cancelada'
-                            : 'Pendente'}
+                              ? 'Cancelada'
+                              : 'Pendente'}
                         </Badge>
                       </SelectTrigger>
                       <SelectContent>
@@ -914,7 +914,7 @@ export function Operations() {
                 <div>
                   <span className="text-muted-foreground">Data: </span>
                   <span className="font-medium">
-                    {format(new Date(operationToView.date), 'dd/MM/yyyy', { locale: ptBR })}
+                    {format(new Date(`${operationToView.date}T12:00:00`), 'dd/MM/yyyy', { locale: ptBR })}
                   </span>
                 </div>
                 <div>
@@ -924,15 +924,15 @@ export function Operations() {
                       operationToView.status === 'completed'
                         ? 'success'
                         : operationToView.status === 'cancelled'
-                        ? 'destructive'
-                        : 'secondary'
+                          ? 'destructive'
+                          : 'secondary'
                     }
                   >
                     {operationToView.status === 'completed'
                       ? 'Concluída'
                       : operationToView.status === 'cancelled'
-                      ? 'Cancelada'
-                      : 'Pendente'}
+                        ? 'Cancelada'
+                        : 'Pendente'}
                   </Badge>
                 </div>
                 {operationToView.desired_return && (
@@ -1038,11 +1038,10 @@ export function Operations() {
                   return (
                     <div
                       key={entry.id}
-                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                        selectedWinningEntry === entry.id
-                          ? 'border-green-500 bg-green-50'
-                          : 'hover:bg-muted'
-                      }`}
+                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${selectedWinningEntry === entry.id
+                        ? 'border-green-500 bg-green-50'
+                        : 'hover:bg-muted'
+                        }`}
                       onClick={() => setSelectedWinningEntry(entry.id || '')}
                     >
                       <div className="flex items-center justify-between">
@@ -1083,10 +1082,9 @@ export function Operations() {
                     </div>
                     <div className="flex justify-between">
                       <span>Lucro Final:</span>
-                      <span className={`font-bold ${
-                        (getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
+                      <span className={`font-bold ${(getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
                         getTotalInvestment(operationToSettle.entries)) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
+                        }`}>
                         {formatCurrency(
                           getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
                           getTotalInvestment(operationToSettle.entries)
