@@ -59,6 +59,7 @@ interface Operation {
   notes: string | null
   status: string
   actual_profit: number | null
+  qualifying_operation_id: string | null
   entries: OperationEntry[]
 }
 
@@ -97,6 +98,10 @@ function getLayReturn(stake: number, odd: number): number {
 
 // Calculate investment for a single entry
 function getEntryInvestment(entry: OperationEntry): number {
+  // Freebet has zero investment from user's pocket
+  if (entry.bet_type === 'freebet') {
+    return 0
+  }
   if (entry.bet_side === 'LAY') {
     return getLayInvestment(entry.stake, entry.odd)
   }
@@ -152,6 +157,7 @@ export function Operations() {
     desired_return: '',
     notes: '',
     status: 'pending',
+    qualifying_operation_id: '' as string,
   })
   const [entries, setEntries] = useState<OperationEntry[]>([{ ...initialEntry }])
 
@@ -171,6 +177,7 @@ export function Operations() {
             notes,
             status,
             actual_profit,
+            qualifying_operation_id,
             entries:operation_entries(
               id,
               house_id,
@@ -212,6 +219,7 @@ export function Operations() {
         desired_return: operation.desired_return?.toString() || '',
         notes: operation.notes || '',
         status: operation.status,
+        qualifying_operation_id: operation.qualifying_operation_id || '',
       })
       setEntries(
         operation.entries.map((e) => ({
@@ -226,6 +234,7 @@ export function Operations() {
         desired_return: '',
         notes: '',
         status: 'pending',
+        qualifying_operation_id: '',
       })
       setEntries([{ ...initialEntry }])
     }
@@ -248,7 +257,16 @@ export function Operations() {
     setEntries(newEntries)
   }
 
-  const calculateOperationTotals = () => {
+  // Get qualifying operation loss (negative profit)
+  const getQualifyingOperationLoss = (qualifyingOpId: string | null): number => {
+    if (!qualifyingOpId) return 0
+    const qualifyingOp = operations.find(op => op.id === qualifyingOpId)
+    if (!qualifyingOp || qualifyingOp.actual_profit === null) return 0
+    // Only return the loss (negative profit), return 0 if it was profitable
+    return qualifyingOp.actual_profit < 0 ? Math.abs(qualifyingOp.actual_profit) : 0
+  }
+
+  const calculateOperationTotals = (qualifyingOpId?: string) => {
     const totalInvested = getTotalInvestment(entries)
 
     // For pending operations, show the worst-case scenario or average
@@ -260,7 +278,11 @@ export function Operations() {
     // Average profit across all scenarios
     const avgProfit = scenarioProfits.reduce((a, b) => a + b, 0) / scenarioProfits.length
 
-    const roi = totalInvested > 0 ? (avgProfit / totalInvested) * 100 : 0
+    // Get qualifying operation loss
+    const qualifyingLoss = qualifyingOpId ? getQualifyingOperationLoss(qualifyingOpId) : 0
+    const netProfit = avgProfit - qualifyingLoss
+
+    const roi = totalInvested > 0 ? (netProfit / totalInvested) * 100 : 0
 
     // Total return if all scenarios were equal (theoretical)
     const totalReturned = entries.reduce((sum, entry) => sum + getEntryReturn(entry), 0)
@@ -268,7 +290,8 @@ export function Operations() {
     return {
       totalInvested,
       totalReturned,
-      profit: avgProfit,
+      profit: netProfit,
+      qualifyingLoss,
       roi
     }
   }
@@ -280,6 +303,7 @@ export function Operations() {
         desired_return: formData.desired_return ? parseFloat(formData.desired_return) : null,
         notes: formData.notes || null,
         status: formData.status,
+        qualifying_operation_id: formData.qualifying_operation_id || null,
       }
 
       if (editingOperation) {
@@ -407,7 +431,8 @@ export function Operations() {
 
       const totalInvestment = getTotalInvestment(operationToSettle.entries)
       const winningReturn = getEntryReturn(winningEntry)
-      const actualProfit = winningReturn - totalInvestment
+      const qualifyingLoss = getQualifyingOperationLoss(operationToSettle.qualifying_operation_id)
+      const actualProfit = winningReturn - totalInvestment - qualifyingLoss
 
       // Update operation status and actual_profit
       const { error: opError } = await supabase
@@ -492,7 +517,7 @@ export function Operations() {
     }).format(value)
   }
 
-  const totals = calculateOperationTotals()
+  const totals = calculateOperationTotals(formData.qualifying_operation_id || undefined)
 
   if (loading) {
     return (
@@ -520,6 +545,7 @@ export function Operations() {
           <TableHeader>
             <TableRow>
               <TableHead>Data</TableHead>
+              <TableHead>Seleções</TableHead>
               <TableHead>Entradas</TableHead>
               <TableHead>Investido</TableHead>
               <TableHead>Lucro</TableHead>
@@ -532,11 +558,25 @@ export function Operations() {
               const invested = getTotalInvestment(op.entries)
               const profit = op.actual_profit
               const isCompleted = op.status === 'completed' && op.actual_profit !== null
+              const qualifyingLoss = getQualifyingOperationLoss(op.qualifying_operation_id)
 
               return (
                 <TableRow key={op.id}>
                   <TableCell>
                     {format(parseISO(op.date), 'dd/MM/yyyy', { locale: ptBR })}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {op.entries.map((e, idx) => (
+                        <Badge
+                          key={idx}
+                          variant="outline"
+                          className="text-xs"
+                        >
+                          {e.selection || '-'}
+                        </Badge>
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -560,6 +600,11 @@ export function Operations() {
                         <span className={profit! >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
                           {formatCurrency(profit!)}
                         </span>
+                        {qualifyingLoss > 0 && (
+                          <div className="text-xs text-muted-foreground">
+                            qualif: -{formatCurrency(qualifyingLoss)}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <span className="text-muted-foreground italic">
@@ -636,7 +681,7 @@ export function Operations() {
             })}
             {operations.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                   Nenhuma operação cadastrada
                 </TableCell>
               </TableRow>
@@ -656,7 +701,7 @@ export function Operations() {
 
           <div className="space-y-6">
             {/* Operation Header */}
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <div className="space-y-2">
                 <Label htmlFor="date">Data *</Label>
                 <Input
@@ -690,6 +735,28 @@ export function Operations() {
                     <SelectItem value="pending">Pendente</SelectItem>
                     <SelectItem value="completed">Concluída</SelectItem>
                     <SelectItem value="cancelled">Cancelada</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Opera\u00e7\u00e3o Qualificativa</Label>
+                <Select
+                  value={formData.qualifying_operation_id}
+                  onValueChange={(value) => setFormData({ ...formData, qualifying_operation_id: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione (opcional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Nenhuma</SelectItem>
+                    {operations
+                      .filter(op => op.status === 'completed' && op.actual_profit !== null)
+                      .filter(op => !editingOperation || op.id !== editingOperation.id)
+                      .map(op => (
+                        <SelectItem key={op.id} value={op.id}>
+                          {format(parseISO(op.date), 'dd/MM/yyyy')} - {op.actual_profit! >= 0 ? 'Lucro' : 'Preju\u00edzo'}: {formatCurrency(op.actual_profit!)}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -868,11 +935,17 @@ export function Operations() {
                 <CardTitle className="text-base">Resumo da Operação</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 md:grid-cols-3 text-center">
+                <div className="grid gap-4 md:grid-cols-4 text-center">
                   <div>
                     <p className="text-sm text-muted-foreground">Investimento Total</p>
                     <p className="text-lg font-bold">{formatCurrency(totals.totalInvested)}</p>
                   </div>
+                  {totals.qualifyingLoss > 0 && (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Custo Qualificativo</p>
+                      <p className="text-lg font-bold text-red-600">-{formatCurrency(totals.qualifyingLoss)}</p>
+                    </div>
+                  )}
                   <div>
                     <p className="text-sm text-muted-foreground">Lucro Médio (todos cenários)</p>
                     <p className={`text-lg font-bold ${totals.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -1000,11 +1073,17 @@ export function Operations() {
                 </TableBody>
               </Table>
 
-              <div className="grid gap-4 md:grid-cols-2 text-sm border-t pt-4">
+              <div className="grid gap-4 md:grid-cols-3 text-sm border-t pt-4">
                 <div>
                   <span className="text-muted-foreground">Investimento Total: </span>
                   <span className="font-bold">{formatCurrency(getTotalInvestment(operationToView.entries))}</span>
                 </div>
+                {operationToView.qualifying_operation_id && getQualifyingOperationLoss(operationToView.qualifying_operation_id) > 0 && (
+                  <div>
+                    <span className="text-muted-foreground">Custo Qualificativo: </span>
+                    <span className="font-bold text-red-600">-{formatCurrency(getQualifyingOperationLoss(operationToView.qualifying_operation_id))}</span>
+                  </div>
+                )}
                 {operationToView.actual_profit !== null && operationToView.actual_profit !== undefined && (
                   <div>
                     <span className="text-muted-foreground">Lucro Real: </span>
@@ -1035,7 +1114,8 @@ export function Operations() {
               <div className="space-y-2">
                 {operationToSettle.entries.map((entry) => {
                   const totalInvestment = getTotalInvestment(operationToSettle.entries)
-                  const profit = getEntryReturn(entry) - totalInvestment
+                  const qualifyingLoss = getQualifyingOperationLoss(operationToSettle.qualifying_operation_id)
+                  const profit = getEntryReturn(entry) - totalInvestment - qualifyingLoss
                   return (
                     <div
                       key={entry.id}
@@ -1082,15 +1162,25 @@ export function Operations() {
                         {formatCurrency(getTotalInvestment(operationToSettle.entries))}
                       </span>
                     </div>
+                    {operationToSettle.qualifying_operation_id && getQualifyingOperationLoss(operationToSettle.qualifying_operation_id) > 0 && (
+                      <div className="flex justify-between">
+                        <span>Custo Qualificativo:</span>
+                        <span className="font-bold text-red-600">
+                          -{formatCurrency(getQualifyingOperationLoss(operationToSettle.qualifying_operation_id))}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span>Lucro Final:</span>
                       <span className={`font-bold ${
                         (getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
-                        getTotalInvestment(operationToSettle.entries)) >= 0 ? 'text-green-600' : 'text-red-600'
+                        getTotalInvestment(operationToSettle.entries) -
+                        getQualifyingOperationLoss(operationToSettle.qualifying_operation_id)) >= 0 ? 'text-green-600' : 'text-red-600'
                       }`}>
                         {formatCurrency(
                           getEntryReturn(operationToSettle.entries.find(e => e.id === selectedWinningEntry)!) -
-                          getTotalInvestment(operationToSettle.entries)
+                          getTotalInvestment(operationToSettle.entries) -
+                          getQualifyingOperationLoss(operationToSettle.qualifying_operation_id)
                         )}
                       </span>
                     </div>
