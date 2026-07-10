@@ -152,6 +152,7 @@ export function Operations() {
   const [operationToView, setOperationToView] = useState<Operation | null>(null)
   const [operationToSettle, setOperationToSettle] = useState<Operation | null>(null)
   const [selectedWinningEntry, setSelectedWinningEntry] = useState<string>('')
+  const [settleLostBet, setSettleLostBet] = useState(false)
   const [formData, setFormData] = useState({
     date: format(new Date(), 'yyyy-MM-dd'),
     desired_return: '',
@@ -224,6 +225,8 @@ export function Operations() {
       setEntries(
         operation.entries.map((e) => ({
           ...e,
+          market: e.market ?? '',
+          selection: e.selection ?? '',
           house: houses.find((h) => h.id === e.house_id),
         }))
       )
@@ -419,20 +422,44 @@ export function Operations() {
       })),
     })
     setSelectedWinningEntry('')
+    setSettleLostBet(false)
     setSettleDialogOpen(true)
   }
 
   const settleOperation = async () => {
-    if (!operationToSettle || !selectedWinningEntry) return
+    if (!operationToSettle) return
+    if (!settleLostBet && !selectedWinningEntry) return
 
     try {
-      const winningEntry = operationToSettle.entries.find(e => e.id === selectedWinningEntry)
-      if (!winningEntry) throw new Error('Entry not found')
+      let actualProfit: number
+      const balanceChanges: Record<string, number> = {}
 
-      const totalInvestment = getTotalInvestment(operationToSettle.entries)
-      const winningReturn = getEntryReturn(winningEntry)
-      const qualifyingLoss = getQualifyingOperationLoss(operationToSettle.qualifying_operation_id)
-      const actualProfit = winningReturn - totalInvestment - qualifyingLoss
+      if (settleLostBet) {
+        // Non-surebet loss: deduct all stakes from respective houses, no return
+        actualProfit = -getTotalInvestment(operationToSettle.entries)
+
+        for (const entry of operationToSettle.entries) {
+          const investment = getEntryInvestment(entry)
+          balanceChanges[entry.house_id] = (balanceChanges[entry.house_id] || 0) - investment
+        }
+      } else {
+        const winningEntry = operationToSettle.entries.find(e => e.id === selectedWinningEntry)
+        if (!winningEntry) throw new Error('Entry not found')
+
+        const totalInvestment = getTotalInvestment(operationToSettle.entries)
+        const winningReturn = getEntryReturn(winningEntry)
+        const qualifyingLoss = getQualifyingOperationLoss(operationToSettle.qualifying_operation_id)
+        actualProfit = winningReturn - totalInvestment - qualifyingLoss
+
+        // Deduct each entry's investment from its house
+        for (const entry of operationToSettle.entries) {
+          const investment = getEntryInvestment(entry)
+          balanceChanges[entry.house_id] = (balanceChanges[entry.house_id] || 0) - investment
+        }
+
+        // Add the winning return to the winning entry's house
+        balanceChanges[winningEntry.house_id] = (balanceChanges[winningEntry.house_id] || 0) + winningReturn
+      }
 
       // Update operation status and actual_profit
       const { error: opError } = await supabase
@@ -444,23 +471,6 @@ export function Operations() {
         .eq('id', operationToSettle.id)
 
       if (opError) throw opError
-
-      // Update house balances:
-      // 1. Deduct investments from all houses
-      // 2. Add return to winning house
-
-      // First, gather all balance changes
-      const balanceChanges: Record<string, number> = {}
-
-      // Deduct each entry's investment from its house
-      for (const entry of operationToSettle.entries) {
-        const investment = getEntryInvestment(entry)
-        const entryHouseId = entry.house_id
-        balanceChanges[entryHouseId] = (balanceChanges[entryHouseId] || 0) - investment
-      }
-
-      // Add the winning return to the winning entry's house
-      balanceChanges[winningEntry.house_id] = (balanceChanges[winningEntry.house_id] || 0) + winningReturn
 
       // Apply all balance changes
       for (const [houseId, change] of Object.entries(balanceChanges)) {
@@ -479,7 +489,11 @@ export function Operations() {
       setSettleDialogOpen(false)
       setOperationToSettle(null)
       loadData()
-      toast.success(`Operação finalizada! Lucro: ${formatCurrency(actualProfit)}`)
+      if (settleLostBet) {
+        toast.error(`Aposta perdida registrada. Prejuizo: ${formatCurrency(Math.abs(actualProfit))}`)
+      } else {
+        toast.success(`Operação finalizada! Lucro: ${formatCurrency(actualProfit)}`)
+      }
     } catch (error) {
       console.error('Error settling operation:', error)
       toast.error('Erro ao finalizar operação')
@@ -644,14 +658,17 @@ export function Operations() {
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
                       {op.status === 'pending' && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => openSettleDialog(op)}
-                          title="Finalizar operação"
-                        >
-                          <CheckCircle2 className="h-4 w-4 text-green-600" />
-                        </Button>
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openSettleDialog(op)}
+                            className="text-green-700 border-green-300 hover:bg-green-50"
+                          >
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                            Finalizar
+                          </Button>
+                        </>
                       )}
                       <Button
                         variant="ghost"
@@ -1100,17 +1117,43 @@ export function Operations() {
 
       {/* Settle Dialog - Select Winning Entry */}
       <Dialog open={settleDialogOpen} onOpenChange={setSettleDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Finalizar Operação</DialogTitle>
           </DialogHeader>
 
-          <p className="text-muted-foreground">
-            Selecione qual entrada foi a vencedora para calcular o lucro real e atualizar os saldos:
-          </p>
-
           {operationToSettle && (
             <div className="space-y-4">
+              {/* Lost bet option */}
+              <div
+                className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                  settleLostBet
+                    ? 'border-red-500 bg-red-50'
+                    : 'hover:bg-muted border-dashed'
+                }`}
+                onClick={() => {
+                  setSettleLostBet(true)
+                  setSelectedWinningEntry('')
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium text-red-700">Aposta Perdida (sem surebet)</div>
+                    <div className="text-sm text-muted-foreground">Todas as entradas foram perdidas. O valor apostado sera debitado dos saldos.</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-red-600">
+                      -{formatCurrency(getTotalInvestment(operationToSettle.entries))}
+                    </div>
+                    <div className="text-xs text-muted-foreground">prejuizo</div>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-muted-foreground text-sm">
+                Ou selecione qual entrada foi a vencedora (surebet):
+              </p>
+
               <div className="space-y-2">
                 {operationToSettle.entries.map((entry) => {
                   const totalInvestment = getTotalInvestment(operationToSettle.entries)
@@ -1124,7 +1167,7 @@ export function Operations() {
                           ? 'border-green-500 bg-green-50'
                           : 'hover:bg-muted'
                       }`}
-                      onClick={() => setSelectedWinningEntry(entry.id || '')}
+                      onClick={() => { setSelectedWinningEntry(entry.id || ''); setSettleLostBet(false) }}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -1199,9 +1242,10 @@ export function Operations() {
             </Button>
             <Button
               onClick={settleOperation}
-              disabled={!selectedWinningEntry}
+              disabled={!selectedWinningEntry && !settleLostBet}
+              variant={settleLostBet ? 'destructive' : 'default'}
             >
-              Confirmar e Finalizar
+              {settleLostBet ? 'Confirmar Aposta Perdida' : 'Confirmar e Finalizar'}
             </Button>
           </DialogFooter>
         </DialogContent>

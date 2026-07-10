@@ -27,6 +27,12 @@ import {
 import { format, parseISO, subDays, startOfWeek, startOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
+interface ExtraProfit {
+  id: string
+  date: string
+  amount: number
+}
+
 interface House {
   id: string
   name: string
@@ -75,6 +81,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [houses, setHouses] = useState<House[]>([])
   const [operations, setOperations] = useState<Operation[]>([])
+  const [extraProfits, setExtraProfits] = useState<ExtraProfit[]>([])
   const [stats, setStats] = useState<Stats>({
     todayProfit: 0,
     weekProfit: 0,
@@ -93,7 +100,7 @@ export function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [housesRes, operationsRes] = await Promise.all([
+      const [housesRes, operationsRes, extraRes] = await Promise.all([
         supabase.from('houses').select('*'),
         supabase
           .from('operations')
@@ -106,12 +113,14 @@ export function Dashboard() {
           `)
           .eq('status', 'completed')
           .order('date', { ascending: false }),
+        supabase.from('extra_profits').select('id, date, amount'),
       ])
 
       if (housesRes.data) setHouses(housesRes.data)
+      if (extraRes.data) setExtraProfits(extraRes.data)
       if (operationsRes.data) {
         setOperations(operationsRes.data as unknown as Operation[])
-        calculateStats(operationsRes.data as unknown as Operation[], housesRes.data || [])
+        calculateStats(operationsRes.data as unknown as Operation[], housesRes.data || [], extraRes.data || [])
       }
     } catch (error) {
       console.error('Error loading data:', error)
@@ -120,7 +129,7 @@ export function Dashboard() {
     }
   }
 
-  const calculateStats = (ops: Operation[], housesList: House[]) => {
+  const calculateStats = (ops: Operation[], housesList: House[], extras: ExtraProfit[]) => {
     const today = new Date()
     const todayStart = new Date(today.setHours(0, 0, 0, 0))
     const weekStart = startOfWeek(today, { weekStartsOn: 1 })
@@ -153,6 +162,15 @@ export function Dashboard() {
       if (opDate >= monthStart) {
         monthProfit += profit
       }
+    })
+
+    // Add extra profits (bonuses, casino, etc.)
+    extras.forEach((ep) => {
+      const epDate = parseISO(ep.date)
+      totalProfit += ep.amount
+      if (epDate >= todayStart) todayProfit += ep.amount
+      if (epDate >= weekStart) weekProfit += ep.amount
+      if (epDate >= monthStart) monthProfit += ep.amount
     })
 
     const roi = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0

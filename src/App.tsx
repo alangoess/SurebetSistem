@@ -12,6 +12,7 @@ import { History } from '@/pages/History'
 import { Calculators } from '@/pages/Calculators'
 import { Reports } from '@/pages/Reports'
 import { Settings } from '@/pages/Settings'
+import { ExtraProfits } from '@/pages/ExtraProfits'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -71,6 +72,7 @@ function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="houses" element={<Houses />} />
         <Route path="operations" element={<Operations />} />
+        <Route path="extra-profits" element={<ExtraProfits />} />
         <Route path="cash" element={<CashRegister />} />
         <Route path="deposits" element={<Deposits />} />
         <Route path="withdrawals" element={<Withdrawals />} />
