@@ -418,7 +418,7 @@ export function Dashboard() {
             <CardTitle>Distribuição de Saldo por Casa</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[300px] max-h-[400px] overflow-y-auto custom-scrollbar">
+            <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -447,7 +447,7 @@ export function Dashboard() {
             <CardTitle>Casas de Apostas</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-1">
+            <div className="space-y-4">
               {houses.map((house) => (
                 <div key={house.id} className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
