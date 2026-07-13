@@ -153,6 +153,7 @@ export function Operations() {
   const [operationToSettle, setOperationToSettle] = useState<Operation | null>(null)
   const [selectedWinningEntry, setSelectedWinningEntry] = useState<string>('')
   const [settleLostBet, setSettleLostBet] = useState(false)
+  const [settleVoidBet, setSettleVoidBet] = useState(false)
   const [formData, setFormData] = useState({
     date: format(new Date(), 'yyyy-MM-dd'),
     desired_return: '',
@@ -300,6 +301,32 @@ export function Operations() {
   }
 
   const saveOperation = async () => {
+    const isNew = !editingOperation
+
+    // Validate balances for new pending operations
+    if (isNew && formData.status === 'pending') {
+      const insufficientHouses: string[] = []
+      const investmentByHouse: Record<string, number> = {}
+
+      for (const entry of entries) {
+        if (entry.bet_type === 'freebet') continue
+        const investment = getEntryInvestment(entry)
+        investmentByHouse[entry.house_id] = (investmentByHouse[entry.house_id] || 0) + investment
+      }
+
+      for (const [houseId, totalNeeded] of Object.entries(investmentByHouse)) {
+        const house = houses.find(h => h.id === houseId)
+        if (house && house.balance < totalNeeded) {
+          insufficientHouses.push(house.name)
+        }
+      }
+
+      if (insufficientHouses.length > 0) {
+        toast.warning(`Saldo insuficiente nesta casa para realizar a operação: ${insufficientHouses.join(', ')}`)
+        return
+      }
+    }
+
     try {
       const operationData = {
         date: formData.date,
@@ -365,6 +392,30 @@ export function Operations() {
           .insert(entriesData)
 
         if (entriesError) throw entriesError
+
+        // Debit investment from each house for new pending operations
+        if (formData.status === 'pending') {
+          const investmentByHouse: Record<string, number> = {}
+          for (const entry of entries) {
+            if (entry.bet_type === 'freebet') continue
+            const investment = getEntryInvestment(entry)
+            investmentByHouse[entry.house_id] = (investmentByHouse[entry.house_id] || 0) + investment
+          }
+
+          for (const [houseId, totalDebit] of Object.entries(investmentByHouse)) {
+            const house = houses.find(h => h.id === houseId)
+            if (!house) continue
+            try {
+              const { error: houseError } = await supabase
+                .from('houses')
+                .update({ balance: house.balance - totalDebit })
+                .eq('id', houseId)
+              if (houseError) throw houseError
+            } catch {
+              toast.error(`Erro ao debitar saldo da casa ${house.name}`)
+            }
+          }
+        }
       }
 
       setDialogOpen(false)
@@ -423,26 +474,32 @@ export function Operations() {
     })
     setSelectedWinningEntry('')
     setSettleLostBet(false)
+    setSettleVoidBet(false)
     setSettleDialogOpen(true)
   }
 
   const settleOperation = async () => {
     if (!operationToSettle) return
-    if (!settleLostBet && !selectedWinningEntry) return
+    if (!settleLostBet && !settleVoidBet && !selectedWinningEntry) return
 
     try {
       let actualProfit: number
       const balanceChanges: Record<string, number> = {}
 
-      if (settleLostBet) {
-        // Non-surebet loss: deduct all stakes from respective houses, no return
-        actualProfit = -getTotalInvestment(operationToSettle.entries)
-
+      if (settleVoidBet) {
+        // Void/Refund: return the exact stake to each house (already debited at creation)
+        actualProfit = 0
         for (const entry of operationToSettle.entries) {
+          if (entry.bet_type === 'freebet') continue
           const investment = getEntryInvestment(entry)
-          balanceChanges[entry.house_id] = (balanceChanges[entry.house_id] || 0) - investment
+          balanceChanges[entry.house_id] = (balanceChanges[entry.house_id] || 0) + investment
         }
+      } else if (settleLostBet) {
+        // Loss: stake already debited at creation, nothing to return
+        actualProfit = -getTotalInvestment(operationToSettle.entries)
+        // No balance changes needed - debit already happened at operation creation
       } else {
+        // Green: return winning entry's full return (stake + profit) to that house
         const winningEntry = operationToSettle.entries.find(e => e.id === selectedWinningEntry)
         if (!winningEntry) throw new Error('Entry not found')
 
@@ -451,13 +508,7 @@ export function Operations() {
         const qualifyingLoss = getQualifyingOperationLoss(operationToSettle.qualifying_operation_id)
         actualProfit = winningReturn - totalInvestment - qualifyingLoss
 
-        // Deduct each entry's investment from its house
-        for (const entry of operationToSettle.entries) {
-          const investment = getEntryInvestment(entry)
-          balanceChanges[entry.house_id] = (balanceChanges[entry.house_id] || 0) - investment
-        }
-
-        // Add the winning return to the winning entry's house
+        // Add the full return (stake + profit) to the winning entry's house
         balanceChanges[winningEntry.house_id] = (balanceChanges[winningEntry.house_id] || 0) + winningReturn
       }
 
@@ -476,20 +527,24 @@ export function Operations() {
       for (const [houseId, change] of Object.entries(balanceChanges)) {
         const house = houses.find(h => h.id === houseId)
         if (house) {
-          const newBalance = house.balance + change
-          const { error: houseError } = await supabase
-            .from('houses')
-            .update({ balance: newBalance })
-            .eq('id', houseId)
-
-          if (houseError) throw houseError
+          try {
+            const { error: houseError } = await supabase
+              .from('houses')
+              .update({ balance: house.balance + change })
+              .eq('id', houseId)
+            if (houseError) throw houseError
+          } catch {
+            toast.error(`Erro ao atualizar saldo da casa. Operação registrada mas saldo pode estar incorreto.`)
+          }
         }
       }
 
       setSettleDialogOpen(false)
       setOperationToSettle(null)
       loadData()
-      if (settleLostBet) {
+      if (settleVoidBet) {
+        toast.info(`Aposta anulada. Stake devolvida ao saldo das casas.`)
+      } else if (settleLostBet) {
         toast.error(`Aposta perdida registrada. Prejuizo: ${formatCurrency(Math.abs(actualProfit))}`)
       } else {
         toast.success(`Operação finalizada! Lucro: ${formatCurrency(actualProfit)}`)
@@ -1133,19 +1188,47 @@ export function Operations() {
                 }`}
                 onClick={() => {
                   setSettleLostBet(true)
+                  setSettleVoidBet(false)
                   setSelectedWinningEntry('')
                 }}
               >
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="font-medium text-red-700">Aposta Perdida (sem surebet)</div>
-                    <div className="text-sm text-muted-foreground">Todas as entradas foram perdidas. O valor apostado sera debitado dos saldos.</div>
+                    <div className="text-sm text-muted-foreground">Todas as entradas foram perdidas. Saldo já foi debitado na abertura.</div>
                   </div>
                   <div className="text-right">
                     <div className="font-bold text-red-600">
                       -{formatCurrency(getTotalInvestment(operationToSettle.entries))}
                     </div>
                     <div className="text-xs text-muted-foreground">prejuizo</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Void/Refund option */}
+              <div
+                className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                  settleVoidBet
+                    ? 'border-yellow-500 bg-yellow-50'
+                    : 'hover:bg-muted border-dashed'
+                }`}
+                onClick={() => {
+                  setSettleVoidBet(true)
+                  setSettleLostBet(false)
+                  setSelectedWinningEntry('')
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium text-yellow-700">Anulada / Reembolsada</div>
+                    <div className="text-sm text-muted-foreground">A aposta foi anulada. A stake será devolvida ao saldo das casas.</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-yellow-600">
+                      +{formatCurrency(getTotalInvestment(operationToSettle.entries))}
+                    </div>
+                    <div className="text-xs text-muted-foreground">devolvido</div>
                   </div>
                 </div>
               </div>
@@ -1167,7 +1250,7 @@ export function Operations() {
                           ? 'border-green-500 bg-green-50'
                           : 'hover:bg-muted'
                       }`}
-                      onClick={() => { setSelectedWinningEntry(entry.id || ''); setSettleLostBet(false) }}
+                      onClick={() => { setSelectedWinningEntry(entry.id || ''); setSettleLostBet(false); setSettleVoidBet(false) }}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -1228,7 +1311,7 @@ export function Operations() {
                       </span>
                     </div>
                     <div className="text-xs text-muted-foreground mt-2 border-t pt-2">
-                      Os saldos das casas serão atualizados automaticamente.
+                      O retorno total será creditado no saldo da casa vencedora.
                     </div>
                   </div>
                 </div>
@@ -1242,10 +1325,10 @@ export function Operations() {
             </Button>
             <Button
               onClick={settleOperation}
-              disabled={!selectedWinningEntry && !settleLostBet}
-              variant={settleLostBet ? 'destructive' : 'default'}
+              disabled={!selectedWinningEntry && !settleLostBet && !settleVoidBet}
+              variant={settleLostBet ? 'destructive' : settleVoidBet ? 'outline' : 'default'}
             >
-              {settleLostBet ? 'Confirmar Aposta Perdida' : 'Confirmar e Finalizar'}
+              {settleLostBet ? 'Confirmar Aposta Perdida' : settleVoidBet ? 'Confirmar Anulação' : 'Confirmar e Finalizar'}
             </Button>
           </DialogFooter>
         </DialogContent>
