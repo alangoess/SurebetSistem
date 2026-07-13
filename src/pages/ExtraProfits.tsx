@@ -33,11 +33,18 @@ import { format, parseISO, startOfMonth, startOfDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { toast } from 'sonner'
 
+interface House {
+  id: string
+  name: string
+  color: string
+}
+
 interface ExtraProfit {
   id: string
   date: string
   amount: number
   source: 'roleta' | 'deposite_ganhe' | 'cassino' | 'outro'
+  house_id: string | null
   notes: string | null
   created_at: string
 }
@@ -65,6 +72,7 @@ function SourceIcon({ source }: { source: string }) {
 
 export function ExtraProfits() {
   const [records, setRecords] = useState<ExtraProfit[]>([])
+  const [houses, setHouses] = useState<House[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -74,6 +82,7 @@ export function ExtraProfits() {
     date: format(new Date(), 'yyyy-MM-dd'),
     amount: '',
     source: 'roleta' as ExtraProfit['source'],
+    house_id: '',
     notes: '',
   })
 
@@ -83,14 +92,18 @@ export function ExtraProfits() {
 
   const loadData = async () => {
     try {
-      const { data, error } = await supabase
-        .from('extra_profits')
-        .select('*')
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false })
+      const [epRes, housesRes] = await Promise.all([
+        supabase
+          .from('extra_profits')
+          .select('*')
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false }),
+        supabase.from('houses').select('id, name, color'),
+      ])
 
-      if (error) throw error
-      if (data) setRecords(data)
+      if (epRes.error) throw epRes.error
+      if (epRes.data) setRecords(epRes.data)
+      if (housesRes.data) setHouses(housesRes.data)
     } catch (error) {
       console.error('Error loading extra profits:', error)
     } finally {
@@ -105,6 +118,7 @@ export function ExtraProfits() {
         date: record.date,
         amount: record.amount.toString(),
         source: record.source,
+        house_id: record.house_id || '',
         notes: record.notes || '',
       })
     } else {
@@ -113,6 +127,7 @@ export function ExtraProfits() {
         date: format(new Date(), 'yyyy-MM-dd'),
         amount: '',
         source: 'roleta',
+        house_id: '',
         notes: '',
       })
     }
@@ -121,13 +136,14 @@ export function ExtraProfits() {
 
   const saveRecord = async () => {
     const amount = parseFloat(formData.amount)
-    if (!formData.date || isNaN(amount) || amount <= 0) return
+    if (!formData.date || isNaN(amount) || amount <= 0 || !formData.house_id) return
 
     try {
       const payload = {
         date: formData.date,
         amount,
         source: formData.source,
+        house_id: formData.house_id,
         notes: formData.notes || null,
       }
 
@@ -137,12 +153,53 @@ export function ExtraProfits() {
           .update(payload)
           .eq('id', editingRecord.id)
         if (error) throw error
+
+        // Adjust house balance: revert old amount, add new amount
+        if (editingRecord.house_id) {
+          const { data: oldHouse } = await supabase
+            .from('houses')
+            .select('balance')
+            .eq('id', editingRecord.house_id)
+            .maybeSingle()
+          if (oldHouse) {
+            await supabase
+              .from('houses')
+              .update({ balance: (oldHouse.balance || 0) - editingRecord.amount })
+              .eq('id', editingRecord.house_id)
+          }
+        }
+        const { data: newHouse } = await supabase
+          .from('houses')
+          .select('balance')
+          .eq('id', formData.house_id)
+          .maybeSingle()
+        if (newHouse) {
+          await supabase
+            .from('houses')
+            .update({ balance: (newHouse.balance || 0) + amount })
+            .eq('id', formData.house_id)
+        }
+
         toast.success('Lucro atualizado')
       } else {
         const { error } = await supabase
           .from('extra_profits')
           .insert(payload)
         if (error) throw error
+
+        // Add amount to house balance
+        const { data: house } = await supabase
+          .from('houses')
+          .select('balance')
+          .eq('id', formData.house_id)
+          .maybeSingle()
+        if (house) {
+          await supabase
+            .from('houses')
+            .update({ balance: (house.balance || 0) + amount })
+            .eq('id', formData.house_id)
+        }
+
         toast.success('Lucro registrado')
       }
 
@@ -272,13 +329,16 @@ export function ExtraProfits() {
             <TableRow>
               <TableHead>Data</TableHead>
               <TableHead>Fonte</TableHead>
+              <TableHead>Casa</TableHead>
               <TableHead>Observações</TableHead>
               <TableHead className="text-right">Valor</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {records.map((record) => (
+            {records.map((record) => {
+              const house = houses.find(h => h.id === record.house_id)
+              return (
               <TableRow key={record.id}>
                 <TableCell>
                   {format(parseISO(record.date), 'dd/MM/yyyy', { locale: ptBR })}
@@ -288,6 +348,16 @@ export function ExtraProfits() {
                     <SourceIcon source={record.source} />
                     {SOURCE_LABELS[record.source]}
                   </span>
+                </TableCell>
+                <TableCell>
+                  {house ? (
+                    <span className="inline-flex items-center gap-1.5 text-sm">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: house.color }} />
+                      {house.name}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground text-sm">-</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {record.notes || '-'}
@@ -306,10 +376,11 @@ export function ExtraProfits() {
                   </div>
                 </TableCell>
               </TableRow>
-            ))}
+              )
+            })}
             {records.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                   Nenhum lucro extra registrado
                 </TableCell>
               </TableRow>
@@ -369,6 +440,25 @@ export function ExtraProfits() {
             </div>
 
             <div className="space-y-2">
+              <Label>Casa de Aposta *</Label>
+              <Select
+                value={formData.house_id}
+                onValueChange={(value) => setFormData({ ...formData, house_id: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a casa" />
+                </SelectTrigger>
+                <SelectContent>
+                  {houses.map((house) => (
+                    <SelectItem key={house.id} value={house.id}>
+                      {house.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="ep-notes">Observações</Label>
               <Textarea
                 id="ep-notes"
@@ -384,7 +474,7 @@ export function ExtraProfits() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
             <Button
               onClick={saveRecord}
-              disabled={!formData.date || !formData.amount || parseFloat(formData.amount) <= 0}
+              disabled={!formData.date || !formData.amount || parseFloat(formData.amount) <= 0 || !formData.house_id}
             >
               {editingRecord ? 'Salvar' : 'Registrar'}
             </Button>

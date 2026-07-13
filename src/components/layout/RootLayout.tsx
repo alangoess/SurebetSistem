@@ -15,9 +15,11 @@ import {
   X,
   Wallet,
   Star,
+  Moon,
+  Sun,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 
 const navItems = [
@@ -38,6 +40,20 @@ export function RootLayout() {
   const { signOut } = useAuth()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem('theme') === 'dark' ||
+      (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  })
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark')
+      localStorage.setItem('theme', 'dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+      localStorage.setItem('theme', 'light')
+    }
+  }, [darkMode])
 
   return (
     <div className="min-h-screen bg-background">
@@ -51,6 +67,14 @@ export function RootLayout() {
           {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </Button>
         <h1 className="ml-4 text-xl font-bold">GFV</h1>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto"
+          onClick={() => setDarkMode(!darkMode)}
+        >
+          {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+        </Button>
       </header>
 
       {/* Sidebar */}
@@ -61,8 +85,16 @@ export function RootLayout() {
         )}
       >
         <div className="h-full flex flex-col">
-          <div className="h-16 flex items-center px-6 border-b">
+          <div className="h-16 flex items-center justify-between px-6 border-b">
             <h1 className="text-xl font-bold text-primary">GFV</h1>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setDarkMode(!darkMode)}
+              className="hidden lg:flex"
+            >
+              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
           </div>
 
           <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -86,7 +118,15 @@ export function RootLayout() {
             ))}
           </nav>
 
-          <div className="p-4 border-t">
+          <div className="p-4 border-t space-y-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-muted-foreground"
+              onClick={() => setDarkMode(!darkMode)}
+            >
+              {darkMode ? <Sun className="mr-3 h-5 w-5" /> : <Moon className="mr-3 h-5 w-5" />}
+              {darkMode ? 'Modo Claro' : 'Modo Escuro'}
+            </Button>
             <Button
               variant="ghost"
               className="w-full justify-start text-muted-foreground"
