@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Plus, Pencil, Trash2, Eye, CheckCircle2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Eye, CheckCircle2, Gift } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { toast } from 'sonner'
@@ -49,6 +49,7 @@ interface OperationEntry {
   bet_side: 'BACK' | 'LAY'
   odd: number
   stake: number
+  source_freebet_operation_id?: string | null
   house?: House
 }
 
@@ -60,6 +61,9 @@ interface Operation {
   status: string
   actual_profit: number | null
   qualifying_operation_id: string | null
+  returns_freebet_on_loss: boolean
+  potential_freebet_amount: number
+  freebet_status: 'pendente' | 'recebida' | 'usada' | null
   entries: OperationEntry[]
 }
 
@@ -160,6 +164,8 @@ export function Operations() {
     notes: '',
     status: 'pending',
     qualifying_operation_id: '' as string,
+    returns_freebet_on_loss: false,
+    potential_freebet_amount: '' as string,
   })
   const [entries, setEntries] = useState<OperationEntry[]>([{ ...initialEntry }])
 
@@ -180,6 +186,9 @@ export function Operations() {
             status,
             actual_profit,
             qualifying_operation_id,
+            returns_freebet_on_loss,
+            potential_freebet_amount,
+            freebet_status,
             entries:operation_entries(
               id,
               house_id,
@@ -188,7 +197,8 @@ export function Operations() {
               bet_type,
               bet_side,
               odd,
-              stake
+              stake,
+              source_freebet_operation_id
             )
           `)
           .order('date', { ascending: false }),
@@ -222,6 +232,8 @@ export function Operations() {
         notes: operation.notes || '',
         status: operation.status,
         qualifying_operation_id: operation.qualifying_operation_id || '',
+        returns_freebet_on_loss: operation.returns_freebet_on_loss ?? false,
+        potential_freebet_amount: operation.potential_freebet_amount?.toString() || '',
       })
       setEntries(
         operation.entries.map((e) => ({
@@ -239,6 +251,8 @@ export function Operations() {
         notes: '',
         status: 'pending',
         qualifying_operation_id: '',
+        returns_freebet_on_loss: false,
+        potential_freebet_amount: '',
       })
       setEntries([{ ...initialEntry }])
     }
@@ -334,6 +348,11 @@ export function Operations() {
         notes: formData.notes || null,
         status: formData.status,
         qualifying_operation_id: formData.qualifying_operation_id || null,
+        returns_freebet_on_loss: formData.returns_freebet_on_loss,
+        potential_freebet_amount: formData.returns_freebet_on_loss && formData.potential_freebet_amount
+          ? parseFloat(formData.potential_freebet_amount)
+          : 0,
+        freebet_status: formData.returns_freebet_on_loss && formData.status === 'pending' ? 'pendente' : null,
       }
 
       if (editingOperation) {
@@ -360,6 +379,7 @@ export function Operations() {
           bet_side: e.bet_side,
           odd: e.odd,
           stake: e.stake,
+          source_freebet_operation_id: e.source_freebet_operation_id || null,
         }))
 
         const { error: entriesError } = await supabase
@@ -385,6 +405,7 @@ export function Operations() {
           bet_side: e.bet_side,
           odd: e.odd,
           stake: e.stake,
+          source_freebet_operation_id: e.source_freebet_operation_id || null,
         }))
 
         const { error: entriesError } = await supabase
@@ -416,6 +437,19 @@ export function Operations() {
             }
           }
         }
+      }
+
+      // Auto-mark source freebets as 'usada'
+      const consumedFreebetOpIds = entries
+        .map(e => e.source_freebet_operation_id)
+        .filter((id): id is string => !!id)
+      if (consumedFreebetOpIds.length > 0) {
+        const uniqueIds = [...new Set(consumedFreebetOpIds)]
+        const { error: freebetError } = await supabase
+          .from('operations')
+          .update({ freebet_status: 'usada' })
+          .in('id', uniqueIds)
+        if (freebetError) throw freebetError
       }
 
       setDialogOpen(false)
@@ -512,12 +546,19 @@ export function Operations() {
         balanceChanges[winningEntry.house_id] = (balanceChanges[winningEntry.house_id] || 0) + winningReturn
       }
 
+      // Determine freebet_status based on result
+      let freebetStatus: 'recebida' | null = null
+      if (operationToSettle.returns_freebet_on_loss && (settleLostBet || (actualProfit < 0 && !settleVoidBet))) {
+        freebetStatus = 'recebida'
+      }
+
       // Update operation status and actual_profit
       const { error: opError } = await supabase
         .from('operations')
         .update({
           status: 'completed',
-          actual_profit: actualProfit
+          actual_profit: actualProfit,
+          freebet_status: freebetStatus,
         })
         .eq('id', operationToSettle.id)
 
@@ -588,6 +629,10 @@ export function Operations() {
 
   const totals = calculateOperationTotals(formData.qualifying_operation_id || undefined)
 
+  const availableFreebetsCount = operations
+    .filter(op => op.freebet_status === 'recebida')
+    .reduce((sum, op) => sum + (op.potential_freebet_amount || 0), 0)
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -603,10 +648,18 @@ export function Operations() {
           <h1 className="text-3xl font-bold">Operações</h1>
           <p className="text-muted-foreground">Gerencie suas operações de apostas</p>
         </div>
-        <Button onClick={() => openDialog()}>
-          <Plus className="mr-2 h-4 w-4" />
-          Nova Operação
-        </Button>
+        <div className="flex items-center gap-3">
+          {availableFreebetsCount > 0 && (
+            <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-sm px-3 py-1.5">
+              <Gift className="mr-1.5 h-4 w-4" />
+              Freebets Disponíveis: {formatCurrency(availableFreebetsCount)}
+            </Badge>
+          )}
+          <Button onClick={() => openDialog()}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nova Operação
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-md border">
@@ -665,14 +718,28 @@ export function Operations() {
                   <TableCell>{formatCurrency(invested)}</TableCell>
                   <TableCell>
                     {isCompleted ? (
-                      <div>
-                        <span className={profit! >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
-                          {formatCurrency(profit!)}
-                        </span>
-                        {qualifyingLoss > 0 && (
-                          <div className="text-xs text-muted-foreground">
-                            qualif: -{formatCurrency(qualifyingLoss)}
-                          </div>
+                      <div className="space-y-1">
+                        <div>
+                          <span className={profit! >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+                            {formatCurrency(profit!)}
+                          </span>
+                          {qualifyingLoss > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              qualif: -{formatCurrency(qualifyingLoss)}
+                            </div>
+                          )}
+                        </div>
+                        {op.freebet_status === 'recebida' && (
+                          <Badge className="bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200 text-xs">
+                            <Gift className="mr-1 h-3 w-3" />
+                            Freebet de {formatCurrency(op.potential_freebet_amount)} Ativa
+                          </Badge>
+                        )}
+                        {op.freebet_status === 'usada' && (
+                          <Badge variant="secondary" className="text-xs opacity-60 line-through">
+                            <Gift className="mr-1 h-3 w-3" />
+                            Freebet Usada
+                          </Badge>
                         )}
                       </div>
                     ) : (
@@ -844,6 +911,43 @@ export function Operations() {
               />
             </div>
 
+            {/* Freebet Reimbursement */}
+            <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="returns_freebet" className="text-sm font-medium">
+                    Retorna Freebet em caso de perda/lucro negativo?
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Marque se a casa devolve o valor apostado como freebet quando a aposta perde.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={formData.returns_freebet_on_loss}
+                  onClick={() => setFormData({ ...formData, returns_freebet_on_loss: !formData.returns_freebet_on_loss })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formData.returns_freebet_on_loss ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.returns_freebet_on_loss ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+              {formData.returns_freebet_on_loss && (
+                <div className="space-y-2">
+                  <Label htmlFor="potential_freebet_amount">Valor da Freebet a receber (R$)</Label>
+                  <Input
+                    id="potential_freebet_amount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={formData.potential_freebet_amount}
+                    onChange={(e) => setFormData({ ...formData, potential_freebet_amount: e.target.value })}
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Entries */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -903,9 +1007,12 @@ export function Operations() {
                           <Label>Tipo</Label>
                           <Select
                             value={entry.bet_type}
-                            onValueChange={(value: 'real' | 'freebet') =>
+                            onValueChange={(value: 'real' | 'freebet') => {
                               updateEntry(index, 'bet_type', value)
-                            }
+                              if (value === 'real') {
+                                updateEntry(index, 'source_freebet_operation_id', null)
+                              }
+                            }}
                           >
                             <SelectTrigger>
                               <SelectValue />
@@ -916,6 +1023,31 @@ export function Operations() {
                             </SelectContent>
                           </Select>
                         </div>
+
+                        {entry.bet_type === 'freebet' && (
+                          <div className="space-y-2 md:col-span-2">
+                            <Label>Freebet de Origem *</Label>
+                            <Select
+                              value={entry.source_freebet_operation_id || ''}
+                              onValueChange={(value: string) =>
+                                updateEntry(index, 'source_freebet_operation_id', value)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione a freebet disponível" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {operations
+                                  .filter(op => op.freebet_status === 'recebida')
+                                  .map(op => (
+                                    <SelectItem key={op.id} value={op.id}>
+                                      {format(new Date(op.date), 'dd/MM/yyyy')} — {formatCurrency(op.potential_freebet_amount)}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
 
                         <div className="space-y-2">
                           <Label>Odd *</Label>

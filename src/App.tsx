@@ -13,6 +13,8 @@ import { Calculators } from '@/pages/Calculators'
 import { Reports } from '@/pages/Reports'
 import { Settings } from '@/pages/Settings'
 import { ExtraProfits } from '@/pages/ExtraProfits'
+import { Admin } from '@/pages/Admin'
+import { Toaster } from '@/components/ui/sonner'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -27,6 +29,28 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
   if (!user) {
     return <Navigate to="/auth" replace />
+  }
+
+  return <>{children}</>
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading, isAdmin } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <Navigate to="/auth" replace />
+  }
+
+  if (!isAdmin) {
+    return <Navigate to="/" replace />
   }
 
   return <>{children}</>
@@ -80,6 +104,11 @@ function AppRoutes() {
         <Route path="calculators" element={<Calculators />} />
         <Route path="reports" element={<Reports />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="admin" element={
+          <AdminRoute>
+            <Admin />
+          </AdminRoute>
+        } />
       </Route>
     </Routes>
   )
@@ -90,6 +119,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <AppRoutes />
+        <Toaster />
       </AuthProvider>
     </BrowserRouter>
   )

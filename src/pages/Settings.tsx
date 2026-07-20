@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -12,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Settings as SettingsIcon, User, DollarSign, Save } from 'lucide-react'
+import { Settings as SettingsIcon, User, DollarSign, Save, ShieldCheck } from 'lucide-react'
 
 interface Settings {
   id: string
@@ -21,7 +22,7 @@ interface Settings {
 }
 
 export function Settings() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -131,6 +132,22 @@ export function Settings() {
             <div className="space-y-2">
               <Label>ID do Usuário</Label>
               <Input value={user?.id || ''} disabled className="font-mono text-xs" />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Função</Label>
+              <div className="flex items-center gap-2">
+                {profile?.is_admin ? (
+                  <Badge variant="default" className="bg-amber-500 hover:bg-amber-500 text-white">
+                    <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                    Administrador
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">
+                    <User className="mr-1 h-3.5 w-3.5" />
+                    Usuário
+                  </Badge>
+                )}
+              </div>
             </div>
           </div>
         </CardContent>

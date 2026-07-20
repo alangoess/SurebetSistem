@@ -58,6 +58,9 @@ export type Database = {
           desired_return: number | null
           notes: string | null
           status: string
+          returns_freebet_on_loss: boolean
+          potential_freebet_amount: number
+          freebet_status: 'pendente' | 'recebida' | 'usada' | null
           created_at: string
           updated_at: string
         }
@@ -68,6 +71,9 @@ export type Database = {
           desired_return?: number | null
           notes?: string | null
           status?: string
+          returns_freebet_on_loss?: boolean
+          potential_freebet_amount?: number
+          freebet_status?: 'pendente' | 'recebida' | 'usada' | null
           created_at?: string
           updated_at?: string
         }
@@ -78,6 +84,9 @@ export type Database = {
           desired_return?: number | null
           notes?: string | null
           status?: string
+          returns_freebet_on_loss?: boolean
+          potential_freebet_amount?: number
+          freebet_status?: 'pendente' | 'recebida' | 'usada' | null
           created_at?: string
           updated_at?: string
         }
@@ -92,6 +101,7 @@ export type Database = {
           bet_type: string
           odd: number
           stake: number
+          source_freebet_operation_id: string | null
           created_at: string
         }
         Insert: {
@@ -103,6 +113,7 @@ export type Database = {
           bet_type?: string
           odd: number
           stake: number
+          source_freebet_operation_id?: string | null
           created_at?: string
         }
         Update: {
@@ -114,6 +125,7 @@ export type Database = {
           bet_type?: string
           odd?: number
           stake?: number
+          source_freebet_operation_id?: string | null
           created_at?: string
         }
       }
@@ -229,6 +241,96 @@ export type Database = {
           user_id?: string
           bankroll?: number
           currency?: string
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      profiles: {
+        Row: {
+          id: string
+          phone: string | null
+          status_badge: 'lead' | 'cliente' | 'expirado'
+          is_lifetime: boolean
+          trial_started_at: string | null
+          expires_at: string | null
+          registration_completed: boolean
+          is_admin: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          phone?: string | null
+          status_badge?: 'lead' | 'cliente' | 'expirado'
+          is_lifetime?: boolean
+          trial_started_at?: string | null
+          expires_at?: string | null
+          registration_completed?: boolean
+          is_admin?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          phone?: string | null
+          status_badge?: 'lead' | 'cliente' | 'expirado'
+          is_lifetime?: boolean
+          trial_started_at?: string | null
+          expires_at?: string | null
+          registration_completed?: boolean
+          is_admin?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      feedbacks: {
+        Row: {
+          id: string
+          user_id: string | null
+          user_email: string
+          message: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id?: string | null
+          user_email: string
+          message: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string | null
+          user_email?: string
+          message?: string
+          created_at?: string
+        }
+      }
+      leads: {
+        Row: {
+          id: string
+          email: string | null
+          phone: string | null
+          status: 'abandoned' | 'registered'
+          auth_user_id: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          email?: string | null
+          phone?: string | null
+          status?: 'abandoned' | 'registered'
+          auth_user_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          email?: string | null
+          phone?: string | null
+          status?: 'abandoned' | 'registered'
+          auth_user_id?: string | null
           created_at?: string
           updated_at?: string
         }

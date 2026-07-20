@@ -1,8 +1,5 @@
-import { useSonner } from "sonner"
-import { cn } from "@/lib/utils"
+import { Toaster as SonnerToaster } from "sonner"
 
 export function Toaster() {
-  const { toasts } = useSonner()
-
-  return null
+  return <SonnerToaster position="top-right" richColors closeButton />
 }

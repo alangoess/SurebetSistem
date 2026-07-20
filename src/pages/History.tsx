@@ -20,9 +20,10 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Download, Filter, X } from 'lucide-react'
+import { Download, Filter, X, Gift } from 'lucide-react'
 import { format, startOfDay, endOfDay, parse, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { toast } from 'sonner'
 
 interface House {
   id: string
@@ -46,6 +47,9 @@ interface Operation {
   date: string
   status: string
   notes: string | null
+  returns_freebet_on_loss: boolean
+  potential_freebet_amount: number
+  freebet_status: 'pendente' | 'recebida' | 'usada' | null
   entries: OperationEntry[]
 }
 
@@ -91,6 +95,9 @@ export function History() {
             date,
             status,
             notes,
+            returns_freebet_on_loss,
+            potential_freebet_amount,
+            freebet_status,
             entries:operation_entries(
               id,
               house_id,
@@ -258,6 +265,10 @@ export function History() {
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
   }
+
+  const availableFreebetsCount = operations
+    .filter(op => op.freebet_status === 'recebida')
+    .reduce((sum, op) => sum + (op.potential_freebet_amount || 0), 0)
 
   const totalInvested = filteredOperations.reduce((sum, op) => sum + calculateOperationProfit(op).invested, 0)
   const totalReturned = filteredOperations.reduce((sum, op) => sum + calculateOperationProfit(op).returned, 0)
@@ -432,6 +443,21 @@ export function History() {
             </p>
           </CardContent>
         </Card>
+        {availableFreebetsCount > 0 && (
+          <Card className="border-amber-300 bg-amber-50/50 dark:bg-amber-900/10">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-1.5">
+                <Gift className="h-4 w-4 text-amber-500" />
+                Freebets Disponíveis
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold text-amber-600">
+                {formatCurrency(availableFreebetsCount)}
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Operations Table */}
@@ -475,7 +501,19 @@ export function History() {
                   <TableCell className="text-right">{formatCurrency(invested)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(returned)}</TableCell>
                   <TableCell className={`text-right font-medium ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {formatCurrency(profit)}
+                    <div>{formatCurrency(profit)}</div>
+                    {op.freebet_status === 'recebida' && (
+                      <Badge className="bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200 text-xs mt-1">
+                        <Gift className="mr-1 h-3 w-3" />
+                        Freebet de {formatCurrency(op.potential_freebet_amount)} Ativa
+                      </Badge>
+                    )}
+                    {op.freebet_status === 'usada' && (
+                      <Badge variant="secondary" className="text-xs mt-1 opacity-60 line-through">
+                        <Gift className="mr-1 h-3 w-3" />
+                        Freebet Usada
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className={`text-right ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {roi.toFixed(2)}%
