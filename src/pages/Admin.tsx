@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Download, MessageSquare, Crown, Clock, Users, Mail, Phone } from 'lucide-react'
+import { Download, MessageSquare, Crown, Clock, Users, Mail, Phone, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 
 type AdminUser = {
@@ -16,6 +16,7 @@ type AdminUser = {
   phone: string | null
   status_badge: 'lead' | 'cliente' | 'expirado'
   is_lifetime: boolean
+  is_admin: boolean
   trial_started_at: string | null
   expires_at: string | null
   registration_completed: boolean
@@ -149,6 +150,27 @@ export function Admin() {
     }
   }
 
+  const toggleAdmin = async (userId: string, current: boolean) => {
+    if (current) {
+      const adminCount = users.filter(u => u.is_admin).length
+      if (adminCount <= 1) {
+        toast.error('Não é possível remover o último administrador')
+        return
+      }
+    }
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_admin: !current })
+        .eq('id', userId)
+      if (error) throw error
+      toast.success(!current ? 'Administrador promovido' : 'Administrador removido')
+      loadData()
+    } catch {
+      toast.error('Erro ao atualizar permissão de administrador')
+    }
+  }
+
   const exportCSV = () => {
     const headers = ['Email', 'WhatsApp']
     const rows = users
@@ -252,13 +274,14 @@ export function Admin() {
                     <TableHead>Status</TableHead>
                     <TableHead>Trial / Plano</TableHead>
                     <TableHead>Vitalício</TableHead>
+                    <TableHead>Admin</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {users.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                         Nenhum usuário cadastrado.
                       </TableCell>
                     </TableRow>
@@ -301,6 +324,24 @@ export function Admin() {
                               ${u.is_lifetime ? 'translate-x-6' : 'translate-x-1'}
                             `} />
                           </button>
+                        </TableCell>
+                        <TableCell>
+                          <button
+                            onClick={() => toggleAdmin(u.id, u.is_admin)}
+                            className={`
+                              relative inline-flex h-6 w-11 items-center rounded-full transition-colors
+                              ${u.is_admin ? 'bg-amber-500' : 'bg-muted'}
+                            `}
+                            title={u.is_admin ? 'Remover admin' : 'Promover a admin'}
+                          >
+                            <span className={`
+                              inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                              ${u.is_admin ? 'translate-x-6' : 'translate-x-1'}
+                            `} />
+                          </button>
+                          {u.is_admin && (
+                            <ShieldCheck className="inline-block ml-1.5 h-3.5 w-3.5 text-amber-500" />
+                          )}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
