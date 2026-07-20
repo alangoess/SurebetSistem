@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { toast } from 'sonner'
 import {
   Select,
   SelectContent,
@@ -13,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Settings as SettingsIcon, User, DollarSign, Save, ShieldCheck } from 'lucide-react'
+import { Settings as SettingsIcon, User, DollarSign, Save, ShieldCheck, Crown } from 'lucide-react'
 
 interface Settings {
   id: string
@@ -22,10 +23,11 @@ interface Settings {
 }
 
 export function Settings() {
-  const { user, profile } = useAuth()
+  const { user, profile, refreshProfile } = useAuth()
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [bootstrapping, setBootstrapping] = useState(false)
   const [formData, setFormData] = useState({
     bankroll: '',
     currency: 'BRL',
@@ -55,6 +57,25 @@ export function Settings() {
       console.error('Error loading settings:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const bootstrapAdmin = async () => {
+    if (!user?.email) return
+    setBootstrapping(true)
+    try {
+      const { error } = await supabase.rpc('bootstrap_first_admin', { admin_email: user.email })
+      if (error) {
+        toast.error(error.message)
+      } else {
+        toast.success('Você agora é administrador!')
+        await refreshProfile()
+      }
+    } catch (error) {
+      console.error('Error bootstrapping admin:', error)
+      toast.error('Erro ao tornar-se admin')
+    } finally {
+      setBootstrapping(false)
     }
   }
 
@@ -148,6 +169,23 @@ export function Settings() {
                   </Badge>
                 )}
               </div>
+              {!profile?.is_admin && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Se você é o primeiro usuário, pode tornar-se administrador.
+                </p>
+              )}
+              {!profile?.is_admin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={bootstrapAdmin}
+                  disabled={bootstrapping}
+                  className="mt-2"
+                >
+                  <Crown className="mr-2 h-4 w-4" />
+                  {bootstrapping ? 'Processando...' : 'Tornar-se Admin'}
+                </Button>
+              )}
             </div>
           </div>
         </CardContent>
