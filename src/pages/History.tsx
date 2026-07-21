@@ -50,6 +50,7 @@ interface Operation {
   returns_freebet_on_loss: boolean
   potential_freebet_amount: number
   freebet_status: 'pendente' | 'recebida' | 'usada' | null
+  actual_profit: number | null
   entries: OperationEntry[]
 }
 
@@ -98,6 +99,7 @@ export function History() {
             returns_freebet_on_loss,
             potential_freebet_amount,
             freebet_status,
+            actual_profit,
             entries:operation_entries(
               id,
               house_id,
@@ -144,7 +146,9 @@ export function History() {
       }
     })
 
-    return { invested, returned, profit: returned - invested }
+    const profit = op.actual_profit !== null ? op.actual_profit : returned - invested
+
+    return { invested, returned, profit }
   }
 
   const applyFilters = () => {

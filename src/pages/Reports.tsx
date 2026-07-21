@@ -49,6 +49,7 @@ interface Operation {
   id: string
   date: string
   status: string
+  actual_profit: number | null
   entries: {
     stake: number
     odd: number
@@ -101,6 +102,7 @@ export function Reports() {
             id,
             date,
             status,
+            actual_profit,
             entries:operation_entries(stake, odd, bet_type, house_id)
           `)
           .eq('status', 'completed')
@@ -130,7 +132,9 @@ export function Reports() {
       }
     })
 
-    return { invested, returned, profit: returned - invested }
+    const profit = op.actual_profit !== null ? op.actual_profit : returned - invested
+
+    return { invested, returned, profit }
   }
 
   const getFilteredOperations = () => {

@@ -164,7 +164,7 @@ export function Deposits() {
           .eq('amount', editingDeposit.amount)
           .eq('date', editingDeposit.date)
           .eq('type', 'withdrawal')
-          .single()
+          .maybeSingle()
 
         if (existingTx) {
           await supabase
@@ -256,7 +256,7 @@ export function Deposits() {
         .eq('amount', depositToDelete.amount)
         .eq('date', depositToDelete.date)
         .eq('type', 'withdrawal')
-        .single()
+        .maybeSingle()
 
       if (existingTx) {
         await supabase.from('bank_transactions').delete().eq('id', existingTx.id)
